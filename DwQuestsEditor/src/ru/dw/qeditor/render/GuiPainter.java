@@ -57,6 +57,8 @@ public final class GuiPainter {
     private final int targetH;
     private final boolean targetPremultiplied;
 
+    private static final AffineTransform IDENTITY = new AffineTransform();
+
     private final Deque<Object[]> stack = new ArrayDeque<>();
 
     // ------------------------------------------------------------------ создание
@@ -504,6 +506,31 @@ public final class GuiPainter {
 
     private void blit(BufferedImage img, float x, float y, float width, float height, Object interpolation) {
         if (img == null || width <= 0 || height <= 0) return;
+
+        // Картинки шейдеров, нодов и иконок растеризуются сразу в экранном
+        // размере, поэтому почти всегда выводятся один в один. Общий путь
+        // Java2D с трансформацией и фильтрацией для этого лишний и заметно
+        // дороже обычного копирования — ловим такой случай отдельно.
+        AffineTransform at0 = g.getTransform();
+        double sx = at0.getScaleX();
+        double sy = at0.getScaleY();
+        if (at0.getShearX() == 0 && at0.getShearY() == 0) {
+            double devW = width * sx;
+            double devH = height * sy;
+            if (Math.abs(devW - img.getWidth()) < 0.51 && Math.abs(devH - img.getHeight()) < 0.51) {
+                double devX = x * sx + at0.getTranslateX();
+                double devY = y * sy + at0.getTranslateY();
+                Shape clip = g.getClip();
+                Shape devClip = clip == null ? null : at0.createTransformedShape(clip);
+                g.setTransform(IDENTITY);
+                if (devClip != null) g.setClip(devClip);
+                g.drawImage(img, (int) Math.round(devX), (int) Math.round(devY), null);
+                g.setTransform(at0);
+                if (clip != null) g.setClip(clip);
+                return;
+            }
+        }
+
         Object old = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, interpolation);
         AffineTransform at = new AffineTransform(

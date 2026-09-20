@@ -66,6 +66,10 @@ public class GamePreview {
     private int panelScroll;
     private int panelContentHeight;
 
+    /** Готовый фон карты: пересобирается только при смене вкладки, размера или сдвига. */
+    private BufferedImage backgroundCache;
+    private String backgroundKey;
+
     private final Map<String, Float> hoverScale = new HashMap<>();
     /** Экранные прямоугольники узлов последнего кадра — для попадания мышью. */
     private final Map<String, float[]> nodeHit = new HashMap<>();
@@ -85,6 +89,7 @@ public class GamePreview {
         boolean changed = this.tab != tab;
         this.tab = tab;
         if (changed) {
+            backgroundCache = null;
             hoverScale.clear();
             openQuestID = null;
             panelScroll = 0;
@@ -207,16 +212,27 @@ public class GamePreview {
         clampMap();
 
         GuiPainter p = GuiPainter.forImage(target, guiScale);
+        boolean profile = Boolean.getBoolean("dwq.profile");
+        long r0 = profile ? System.nanoTime() : 0;
+        long r1 = r0, r2 = r0, r3 = r0;
         try {
             p.rectOpaque(0, 0, screenW, screenH, 0xFF0D0D12);
             p.guiBackground(guiLeft, guiTop, guiWidth, guiHeight);
+            if (profile) r1 = System.nanoTime();
             drawBrowser(p);
+            if (profile) r2 = System.nanoTime();
             drawTabButtons(p);
+            if (profile) r3 = System.nanoTime();
             if (openQuestID != null && tab != null && tab.quests.containsKey(openQuestID)) {
                 drawQuestPanel(p, tab.quests.get(openQuestID));
             }
         } finally {
             p.dispose();
+        }
+        if (profile) {
+            long r4 = System.nanoTime();
+            System.out.printf("кадр: рамка %d мс, карта %d мс, колонка %d мс, панель %d мс%n",
+                    (r1 - r0) / 1000000, (r2 - r1) / 1000000, (r3 - r2) / 1000000, (r4 - r3) / 1000000);
         }
     }
 
@@ -224,18 +240,28 @@ public class GamePreview {
         nodeHit.clear();
         if (tab == null) return;
 
+        boolean profile = Boolean.getBoolean("dwq.profile");
+        long t0 = profile ? System.nanoTime() : 0;
+
         p.push();
         p.clip(bx, by, bw, bh);
-        drawMapBackground(p, 1f);
+        drawMapBackground(p);
+        long t1 = profile ? System.nanoTime() : 0;
 
         p.push();
         p.translate(bx, by);
         p.scale(1f / zoomFactor);
         drawLinks(p);
+        long t2 = profile ? System.nanoTime() : 0;
         drawQuestButtons(p, false);
         drawQuestButtons(p, true);
         p.pop();
         p.pop();
+        if (profile) {
+            long t3 = System.nanoTime();
+            System.out.printf("просмотр: фон %d мс, связи %d мс, узлы %d мс%n",
+                    (t1 - t0) / 1000000, (t2 - t1) / 1000000, (t3 - t2) / 1000000);
+        }
 
         p.push();
         p.translate(bx, by);
@@ -245,11 +271,55 @@ public class GamePreview {
         drawScrollBars(p);
     }
 
-    /** UIBrowser.drawBackground: фон вкладки + пять слоёв Stars с параллаксом. */
-    private void drawMapBackground(GuiPainter p, float extraScale) {
-        BufferedImage bg = ModAssets.get().tabBackground(tab == null ? null : tab.tabID);
-        BufferedImage stars = ModAssets.get().stars();
+    /**
+     * UIBrowser.drawBackground: фон вкладки + пять слоёв Stars с параллаксом.
+     *
+     * <p>Шесть тайловых заливок на всю карту стоят около 60 мс на кадр, а меняются
+     * они только при панораме и зуме. Поэтому картинка собирается один раз и потом
+     * просто выводится — анимация нодов и линий идёт поверх готового фона.
+     */
+    private void drawMapBackground(GuiPainter p) {
+        BufferedImage bg = backgroundImage();
+        if (bg == null) return;
+        p.image(bg, bx, by, bw, bh);
+    }
 
+    private BufferedImage backgroundImage() {
+        int devW = Math.max(1, Math.round(bw * guiScale));
+        int devH = Math.max(1, Math.round(bh * guiScale));
+
+        float[] uv = backgroundUv();
+        String key = (tab == null ? "-" : tab.tabID) + "|" + devW + "x" + devH
+                + "|" + Math.round(uv[0] * 8) + "," + Math.round(uv[1] * 8)
+                + "|" + Math.round(uv[2] * 8) + "," + Math.round(uv[3] * 8);
+        if (backgroundCache != null && key.equals(backgroundKey)) return backgroundCache;
+
+        BufferedImage img = new BufferedImage(devW, devH, BufferedImage.TYPE_INT_ARGB);
+        GuiPainter bp = GuiPainter.forImage(img, guiScale);
+        try {
+            BufferedImage bgTex = ModAssets.get().tabBackground(tab == null ? null : tab.tabID);
+            BufferedImage stars = ModAssets.get().stars();
+            float uBack = uv[0], vBack = uv[1], zoomedWidth = uv[2], zoomedHeight = uv[3];
+            float scaleFactor = uv[4];
+
+            bp.scale(1.5f);
+            bp.scale(scaleFactor);
+            bp.texturedModalRect(bgTex, 0, 0, uBack, vBack, zoomedWidth, zoomedHeight);
+            float[] layers = {1.33f, 1.77f, 2.37f, 3.16f, 4.21f};
+            for (float s : layers) {
+                bp.scale(0.75f);
+                bp.texturedModalRect(stars, 0, 0, uBack, vBack, zoomedWidth * s, zoomedHeight * s);
+            }
+        } finally {
+            bp.dispose();
+        }
+        backgroundCache = img;
+        backgroundKey = key;
+        return img;
+    }
+
+    /** Расчёт окна текстуры из UIBrowser.drawBackground: {u, v, ширина, высота, масштаб}. */
+    private float[] backgroundUv() {
         int textureWidth = 256;
         int textureHeight = 256;
         float backgroundZoom = 1.5f;
@@ -274,19 +344,7 @@ public class GamePreview {
         float denomY = mapH - bh * zoomFactor;
         float uBack = denomX == 0 ? 0 : (guiMapX + mapLeftOffset) / denomX * (textureWidth - zoomedWidth);
         float vBack = denomY == 0 ? 0 : (guiMapY + mapTopOffset) / denomY * (textureHeight - zoomedHeight);
-
-        p.push();
-        p.translate(bx, by);
-        if (extraScale != 1f) p.scale(extraScale);
-        p.scale(backgroundZoom);
-        p.scale(scaleFactor);
-        p.texturedModalRect(bg, 0, 0, uBack, vBack, zoomedWidth, zoomedHeight);
-        float[] layers = {1.33f, 1.77f, 2.37f, 3.16f, 4.21f};
-        for (float s : layers) {
-            p.scale(0.75f);
-            p.texturedModalRect(stars, 0, 0, uBack, vBack, zoomedWidth * s, zoomedHeight * s);
-        }
-        p.pop();
+        return new float[]{uBack, vBack, zoomedWidth, zoomedHeight, scaleFactor};
     }
 
     /** UIBrowser.drawForeground — полоски прокрутки по краям карты. */
@@ -369,6 +427,12 @@ public class GamePreview {
     }
 
     private void drawLinks(GuiPainter p) {
+        // glLineWidth в моде задаётся в пикселях экрана и от масштаба карты не
+        // зависит; здесь рисуем внутри матрицы, сжатой в zoomFactor раз, поэтому
+        // в её единицах ширина равна 3.5 / guiScale
+        float lineWidth = 3.5f / zoomFactor;
+        boolean gradient = tab.quests.size() <= 400;
+        LinkRenderer.Batch batch = LinkRenderer.batch(p, lineWidth, true, gradient);
         for (Quest q : tab.quests.values()) {
             if (q.parents.isEmpty()) continue;
             boolean childActive = !questCompleted(q);
@@ -385,12 +449,24 @@ public class GamePreview {
                 float y1 = pq.displayY * CELL - guiMapY + 12f;
                 float x2 = q.displayX * CELL - guiMapX + 12f;
                 float y2 = q.displayY * CELL - guiMapY + 12f;
+                if (!linkVisible(x1, y1, x2, y2)) continue;
                 int color = lineShine ? Defs.Star.of(q.rarity).mainColor : -13421773;
                 int parentColor = lineShine ? Defs.Star.of(pq.rarity).mainColor : -5592406;
-                LinkRenderer.draw(p, x1, y1, x2, y2, color, parentColor, lineShine,
-                        parent.lineType, tick, 3.5f / zoomFactor);
+                batch.line(x1, y1, x2, y2, color, parentColor, lineShine,
+                        parent.lineType, tick, null);
             }
         }
+        batch.close();
+    }
+
+    /** Пересекает ли связь видимую часть карты (с запасом на выгиб дуги). */
+    private boolean linkVisible(float x1, float y1, float x2, float y2) {
+        float dist = Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2));
+        float margin = dist * 0.5f + CELL;
+        float w = bw * zoomFactor;
+        float h = bh * zoomFactor;
+        return Math.max(x1, x2) + margin >= 0 && Math.min(x1, x2) - margin <= w
+                && Math.max(y1, y2) + margin >= 0 && Math.min(y1, y2) - margin <= h;
     }
 
     // ------------------------------------------------------------------ левая колонка
@@ -522,7 +598,7 @@ public class GamePreview {
         p.translate(px + pw / 2f, py + ph / 2f);
         p.scale(s);
         p.translate(-(px + pw / 2f), -(py + ph / 2f));
-        drawMapBackground(p, 1f);
+        drawMapBackground(p);
         p.pop();
 
         PanelLayout pl = layoutPanel(quest, px, py, pw);

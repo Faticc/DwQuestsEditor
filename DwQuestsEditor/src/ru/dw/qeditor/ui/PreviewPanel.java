@@ -69,6 +69,16 @@ public class PreviewPanel extends JComponent {
         addMouseWheelListener(ma);
     }
 
+    /**
+     * На больших вкладках кадр рисуется дольше игрового тика. Гнать таймер в
+     * этом случае бессмысленно — он лишь забивает очередь событий, поэтому
+     * интервал подстраивается под реальное время отрисовки.
+     */
+    private void adjustRate(long frameMs) {
+        int want = frameMs > 60 ? 150 : frameMs > 30 ? 100 : 50;
+        if (timer.getDelay() != want) timer.setDelay(want);
+    }
+
     public GamePreview preview() { return preview; }
 
     public void setOnQuestOpened(Runnable r) { this.onQuestOpened = r; }
@@ -88,8 +98,12 @@ public class PreviewPanel extends JComponent {
         int w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
         if (buffer == null || buffer.getWidth() != w || buffer.getHeight() != h)
-            buffer = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+            // поле закрашивается целиком, прозрачность не нужна: непрозрачный буфер
+            // и рисуется быстрее, и выводится на экран простым копированием
+            buffer = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        long start = System.nanoTime();
         preview.render(buffer);
         g.drawImage(buffer, 0, 0, null);
+        adjustRate((System.nanoTime() - start) / 1_000_000);
     }
 }

@@ -231,6 +231,10 @@ public class AssistantPanel extends JPanel {
     private void applyPending() {
         if (pending == null) return;
         QuestTab candidate = pending;
+        // ответ модели может переписать полвкладки — кладём копию до правки
+        ru.dw.qeditor.io.Backups.saveIfChanged(model.file(), model.tab().toJsonString(),
+                ru.dw.qeditor.io.Backups.Reason.BEFORE_ASSISTANT,
+                ru.dw.qeditor.assets.Config.get().backupKeep);
         model.edit("Правка помощником", () -> {
             QuestTab tab = model.tab();
             tab.tabID = candidate.tabID;
@@ -241,7 +245,7 @@ public class AssistantPanel extends JPanel {
             tab.extra.map().clear();
             tab.extra.map().putAll(candidate.extra.map());
         });
-        status.setText("Применено");
+        status.setText("Применено — прежнее состояние осталось в истории версий");
         apply.setEnabled(false);
         pending = null;
     }

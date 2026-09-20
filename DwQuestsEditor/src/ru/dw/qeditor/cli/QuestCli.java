@@ -80,6 +80,10 @@ public final class QuestCli {
             case "reward-remove": return rewardRemove(a);
             case "patch":      return patch(a);
             case "find-item":  return findItem(a);
+            case "versions":   return versions(a);
+            case "backup":     return backup(a);
+            case "restore":    return restore(a);
+            case "tabs":       return tabs(a);
             default:
                 throw new UsageException("неизвестная команда «" + cmd + "», см. help");
         }
@@ -155,6 +159,65 @@ public final class QuestCli {
         List<ItemRegistry.Entry> found = ItemRegistry.get().search(query, mod, limit);
         for (ItemRegistry.Entry e : found) out.println(e.key + "   —   " + e.name);
         out.println("Найдено: " + found.size());
+        return 0;
+    }
+
+    /** Список сохранённых версий вкладки. */
+    private static int versions(Args a) throws Exception {
+        File f = a.file();
+        java.util.List<ru.dw.qeditor.io.Backups.Version> list = ru.dw.qeditor.io.Backups.list(f);
+        for (int i = 0; i < list.size(); i++) {
+            ru.dw.qeditor.io.Backups.Version v = list.get(i);
+            out.printf("%3d  %s  %-28s %s%n", i, v.humanTime(), v.reason.ru, v.file.getName());
+        }
+        out.println(ru.dw.qeditor.io.Backups.summary(f));
+        return 0;
+    }
+
+    /** Сохранить копию текущего состояния файла. */
+    private static int backup(Args a) throws Exception {
+        File f = a.file();
+        QuestTab tab = a.tab();
+        File made = ru.dw.qeditor.io.Backups.save(f, tab.toJsonString(),
+                ru.dw.qeditor.io.Backups.Reason.MANUAL, a.integer("keep", 60));
+        if (made == null) {
+            out.println("Не удалось сохранить копию");
+            return 1;
+        }
+        out.println("Копия сохранена: " + made.getAbsolutePath());
+        return 0;
+    }
+
+    /** Восстановить вкладку из версии по номеру из списка versions. */
+    private static int restore(Args a) throws Exception {
+        File f = a.file();
+        int index = a.integer("version", -1);
+        java.util.List<ru.dw.qeditor.io.Backups.Version> list = ru.dw.qeditor.io.Backups.list(f);
+        if (index < 0 || index >= list.size())
+            throw new UsageException("нужен --version N из списка versions (всего: " + list.size() + ")");
+
+        ru.dw.qeditor.io.Backups.Version v = list.get(index);
+        QuestTab restored = ru.dw.qeditor.io.Backups.read(v);
+        if (f.isFile()) {
+            ru.dw.qeditor.io.Backups.save(f, TabIO.load(f).toJsonString(),
+                    ru.dw.qeditor.io.Backups.Reason.BEFORE_RESTORE, a.integer("keep", 60));
+        }
+        return write(a, restored, "Восстановлена версия от " + v.humanTime());
+    }
+
+    /** Все вкладки в папке. */
+    private static int tabs(Args a) {
+        File dir = a.file();
+        if (!dir.isDirectory()) throw new UsageException("не папка: " + dir.getAbsolutePath());
+        ru.dw.qeditor.io.Workspace ws = new ru.dw.qeditor.io.Workspace();
+        ws.open(dir);
+        out.printf("%-28s %-28s %7s %6s%n", "файл", "tabID", "квестов", "sort");
+        for (ru.dw.qeditor.io.Workspace.Entry e : ws.entries()) {
+            out.printf("%-28s %-28s %7s %6d%n", cut(e.file.getName(), 28),
+                    e.error != null ? "(не читается)" : cut(e.title(), 28),
+                    e.error != null ? "-" : String.valueOf(e.questCount), e.sortIndex);
+        }
+        out.println("Вкладок: " + ws.entries().size() + ", квестов всего: " + ws.totalQuests());
         return 0;
     }
 
@@ -487,6 +550,10 @@ public final class QuestCli {
         out.println("  validate <файл>                   проверка (код возврата 1, если есть ошибки)");
         out.println("  export <файл>                     компактный JSON для /dwq tab paste");
         out.println("  find-item <строка> [--mod M] [--limit N]   поиск предмета по имени или id");
+        out.println("  tabs <папка>                      список вкладок в папке");
+        out.println("  versions <файл>                   сохранённые версии вкладки");
+        out.println("  backup <файл> [--keep N]          сохранить копию сейчас");
+        out.println("  restore <файл> --version N        вернуть вкладку к версии из списка");
         out.println();
         out.println("Запись (общие ключи: --out <файл>, --dry-run, --validate):");
         out.println("  new <файл> --tab <tabID> [--icon ID] [--sort N]");

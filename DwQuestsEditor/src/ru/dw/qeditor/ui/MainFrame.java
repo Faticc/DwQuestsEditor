@@ -4,7 +4,9 @@ import ru.dw.qeditor.assets.Config;
 import ru.dw.qeditor.assets.ItemRegistry;
 import ru.dw.qeditor.assets.McFont;
 import ru.dw.qeditor.assets.ModAssets;
+import ru.dw.qeditor.io.Backups;
 import ru.dw.qeditor.io.TabIO;
+import ru.dw.qeditor.io.Workspace;
 import ru.dw.qeditor.json.JsonObject;
 import ru.dw.qeditor.json.JsonParser;
 import ru.dw.qeditor.json.JsonWriter;
@@ -66,6 +68,8 @@ import java.util.Map;
 public class MainFrame extends JFrame implements EditorModel.Listener {
 
     private final EditorModel model = new EditorModel();
+    private final Workspace workspace = new Workspace();
+    private final ProjectPanel projectPanel = new ProjectPanel(workspace);
     private final EditorCanvas canvas = new EditorCanvas(model);
     private final PreviewPanel previewPanel = new PreviewPanel();
     private final SidebarPanel sidebar = new SidebarPanel(model);
@@ -73,6 +77,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
     private final SegmentedTabs tabs = new SegmentedTabs();
     private final JLabel statusBar = new JLabel(" ");
 
+    private JSplitPane projectSplit;
     private JMenuItem undoItem;
     private JMenuItem redoItem;
 
@@ -96,12 +101,24 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         tabs.setOnChange(i -> onTabChanged());
         tabs.setBorder(Theme.padding(0, 16, 0, 8));
 
+        projectPanel.setOnOpen(e -> openTabFile(e.file));
+        projectPanel.setOnNewTab(this::newTabInFolder);
+        projectPanel.setOnChooseFolder(this::openFolder);
+
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, tabs, sidebar);
         split.setResizeWeight(1);
-        split.setDividerLocation(1060);
+        split.setDividerLocation(840);
         split.setBorder(null);
         split.setOpaque(false);
         split.setContinuousLayout(true);
+
+        JSplitPane withProject = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, projectPanel, split);
+        withProject.setResizeWeight(0);
+        withProject.setDividerLocation(230);
+        withProject.setBorder(null);
+        withProject.setOpaque(false);
+        withProject.setContinuousLayout(true);
+        this.projectSplit = withProject;
 
         statusBar.setBorder(Theme.padding(6, 16, 6, 16));
         statusBar.setForeground(Theme.TEXT_MUTED);
@@ -113,7 +130,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
 
         getContentPane().setBackground(Theme.BG);
         setLayout(new BorderLayout());
-        add(split, BorderLayout.CENTER);
+        add(withProject, BorderLayout.CENTER);
         add(statusWrap, BorderLayout.SOUTH);
 
         JMenuBar menuBar = buildMenu();
@@ -132,6 +149,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         startAutosaveTimer();
         updateTitle();
         checkAssets();
+        restoreLastFolder();
     }
 
     // ------------------------------------------------------------------ раскладка
@@ -195,6 +213,8 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         bar.add(toggle("сетка", true, canvas::setShowGrid));
         bar.add(toggle("привязка", true, canvas::setSnap));
         bar.add(toggle("имена", true, canvas::setShowNames));
+        bar.add(toggle("связи", true, canvas::setShowLinks));
+        bar.add(toggle("скрытые", false, canvas::setShowHiddenLinks));
         bar.add(separator());
 
         bar.add(FlatButton.ghost("Вписать", canvas::fitToContent).small());
@@ -244,6 +264,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         JMenu file = new JMenu("Файл");
         file.add(item("Новая вкладка", KeyEvent.VK_N, this::newTab));
         file.add(item("Открыть…", KeyEvent.VK_O, this::open));
+        file.add(item("Открыть папку…", 0, this::openFolder));
         file.add(item("Сохранить", KeyEvent.VK_S, this::save));
         file.add(item("Сохранить как…", 0, this::saveAs));
         file.addSeparator();
@@ -278,6 +299,13 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
             if (id != null) canvas.centerOn(id);
         }));
         view.addSeparator();
+        JCheckBoxMenuItem showProject = new JCheckBoxMenuItem("Список вкладок папки", true);
+        showProject.addActionListener(e -> {
+            projectPanel.setVisible(showProject.isSelected());
+            projectSplit.setDividerLocation(showProject.isSelected() ? 230 : 0);
+            projectSplit.setDividerSize(showProject.isSelected() ? 6 : 0);
+        });
+        view.add(showProject);
         JCheckBoxMenuItem watch = new JCheckBoxMenuItem("Следить за файлом", Config.get().watchFile);
         watch.addActionListener(e -> {
             Config.get().watchFile = watch.isSelected();
@@ -287,6 +315,13 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         mb.add(view);
 
         JMenu tools = new JMenu("Инструменты");
+        tools.add(item("История версий…", KeyEvent.VK_H, this::showVersions));
+        tools.add(item("Сохранить версию сейчас", 0, () -> {
+            File made = Backups.save(model.file(), model.tab().toJsonString(),
+                    Backups.Reason.MANUAL, Config.get().backupKeep);
+            status(made == null ? "Не удалось сохранить версию" : "Версия сохранена: " + made.getName());
+        }));
+        tools.addSeparator();
         tools.add(item("Проверить вкладку", KeyEvent.VK_T, this::validateTab));
         tools.add(item("Диагностика окружения", 0, this::diagnostics));
         tools.add(item("Настройки…", 0, this::settings));
@@ -332,10 +367,121 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
             Config.get().lastDir = f.getParent();
             Config.get().save();
             canvas.fitToContent();
-            status("Открыто: " + f.getName() + ", квестов: " + tab.quests.size());
+            if (!workspace.isOpen() && f.getParentFile() != null) {
+                workspace.open(f.getParentFile());
+                Config.get().lastFolder = f.getParent();
+                projectPanel.refresh();
+            }
+            projectPanel.setCurrentFile(f);
+            status("Открыто: " + f.getName() + ", квестов: " + tab.quests.size()
+                    + "   •   " + Backups.summary(f));
         } catch (Exception e) {
             error("Не удалось открыть файл", e);
         }
+    }
+
+    /** При запуске вернуть папку, с которой работали в прошлый раз. */
+    private void restoreLastFolder() {
+        String last = Config.get().lastFolder;
+        if (last == null || last.isEmpty()) return;
+        File dir = new File(last);
+        if (!dir.isDirectory()) return;
+        workspace.open(dir);
+        projectPanel.refresh();
+        status("Папка: " + dir.getName() + ", вкладок: " + workspace.entries().size()
+                + ", квестов: " + workspace.totalQuests());
+    }
+
+    /** Открыть папку с вкладками — список появится слева. */
+    private void openFolder() {
+        JFileChooser fc = new JFileChooser();
+        fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        fc.setDialogTitle("Папка с вкладками квестов");
+        String last = Config.get().lastFolder.isEmpty() ? Config.get().lastDir : Config.get().lastFolder;
+        if (last != null && !last.isEmpty()) fc.setCurrentDirectory(new File(last));
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+
+        File dir = fc.getSelectedFile();
+        workspace.open(dir);
+        Config.get().lastFolder = dir.getAbsolutePath();
+        Config.get().save();
+        projectPanel.refresh();
+
+        if (workspace.entries().isEmpty()) {
+            status("В папке нет вкладок: " + dir.getName());
+            return;
+        }
+        status("Папка открыта: " + dir.getName() + ", вкладок: " + workspace.entries().size()
+                + ", квестов: " + workspace.totalQuests());
+        Workspace.Entry first = workspace.entries().get(0);
+        if (model.file() == null && !model.isDirty()) openTabFile(first.file);
+        else projectPanel.setCurrentFile(model.file());
+    }
+
+    /** Переключиться на вкладку из списка папки. */
+    private void openTabFile(File f) {
+        if (f == null || !f.isFile()) return;
+        if (model.file() != null && f.getAbsolutePath().equals(model.file().getAbsolutePath())) return;
+        if (!confirmDiscard(Backups.Reason.BEFORE_OPEN)) {
+            projectPanel.setCurrentFile(model.file());
+            return;
+        }
+        try {
+            QuestTab tab = TabIO.load(f);
+            model.setTab(tab, f, false);
+            selectFirstQuest();
+            canvas.fitToContent();
+            projectPanel.setCurrentFile(f);
+            status("Открыто: " + f.getName() + ", квестов: " + tab.quests.size()
+                    + "   •   " + Backups.summary(f));
+        } catch (Exception e) {
+            error("Не удалось открыть " + f.getName(), e);
+        }
+    }
+
+    /** Создать вкладку прямо в открытой папке. */
+    private void newTabInFolder() {
+        if (!workspace.isOpen()) {
+            openFolder();
+            if (!workspace.isOpen()) return;
+        }
+        String id = JOptionPane.showInputDialog(this, "Имя новой вкладки (tabID):", "NewTab");
+        if (id == null || id.trim().isEmpty()) return;
+        File f = workspace.fileFor(id.trim());
+        if (f.exists()) {
+            JOptionPane.showMessageDialog(this, "Файл уже есть: " + f.getName(),
+                    "Создание вкладки", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (!confirmDiscard(Backups.Reason.BEFORE_OPEN)) return;
+        try {
+            QuestTab tab = QuestTab.empty(id.trim());
+            TabIO.save(f, tab);
+            model.setTab(tab, f, false);
+            projectPanel.refresh();
+            projectPanel.setCurrentFile(f);
+            canvas.fitToContent();
+            status("Создана вкладка: " + f.getName());
+        } catch (Exception e) {
+            error("Не удалось создать вкладку", e);
+        }
+    }
+
+    /** История версий текущей вкладки. */
+    private void showVersions() {
+        QuestTab restoredTab = VersionsDialog.open(this, model.file(), model.tab());
+        if (restoredTab == null) return;
+        Backups.save(model.file(), model.tab().toJsonString(),
+                Backups.Reason.BEFORE_RESTORE, Config.get().backupKeep);
+        model.setTab(restoredTab, model.file(), true);
+        selectFirstQuest();
+        status("Версия восстановлена — не забудь сохранить (Ctrl+S)");
+    }
+
+    /** Копия текущего состояния в историю версий. */
+    private void backup(Backups.Reason reason) {
+        if (Config.get().backupKeep <= 0) return;
+        Backups.saveIfChanged(model.file(), model.tab().toJsonString(), reason, Config.get().backupKeep);
     }
 
     private void save() {
@@ -344,9 +490,11 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
             return;
         }
         try {
+            if (Config.get().backupOnSave) backup(Backups.Reason.SAVE);
             TabIO.save(model.file(), model.tab());
             model.markSaved(model.file());
-            status("Сохранено: " + model.file().getName());
+            projectPanel.refresh();
+            status("Сохранено: " + model.file().getName() + "   •   " + Backups.summary(model.file()));
         } catch (Exception e) {
             error("Не удалось сохранить", e);
         }
@@ -364,6 +512,8 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         try {
             TabIO.save(f, model.tab());
             model.markSaved(f);
+            if (Config.get().backupOnSave) backup(Backups.Reason.SAVE);
+            projectPanel.refresh();
             Config.get().lastDir = f.getParent();
             Config.get().save();
             status("Сохранено: " + f.getName());
@@ -387,8 +537,10 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
             return;
         }
         if (model.isDirty() && JOptionPane.showConfirmDialog(this,
-                "Несохранённые изменения будут потеряны. Перечитать файл?", "Перечитать",
+                "Несохранённые изменения будут потеряны. Перечитать файл?" + "\n"
+                        + "Текущее состояние сохранится копией в истории версий.", "Перечитать",
                 JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
+        backup(Backups.Reason.BEFORE_RELOAD);
         try {
             model.setTab(TabIO.load(f), f, false);
             status("Файл перечитан: " + f.getName());
@@ -583,6 +735,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
                 "Разложить " + tab.quests.size() + " квестов сеткой " + cols + " в ряд?\n"
                         + "Текущие координаты будут перезаписаны.", "Разложить сеткой",
                 JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
+        backup(Backups.Reason.BEFORE_LAYOUT);
         model.edit("Раскладка сеткой", () -> {
             int i = 0;
             for (Quest q : tab.quests.values()) {
@@ -669,6 +822,9 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         JTextField coreJar = new JTextField(c.dwCoreJar, 40);
         JTextField mcJar = new JTextField(c.mcClientJar, 40);
         JTextField claudeExe = new JTextField(c.claudeExe, 40);
+        JSpinner keep = new JSpinner(new SpinnerNumberModel(c.backupKeep, 0, 500, 10));
+        JSpinner autoMinutes = new JSpinner(new SpinnerNumberModel(c.autoBackupMinutes, 0, 120, 1));
+        JCheckBox onSave = new JCheckBox("Копия при каждом сохранении", c.backupOnSave);
         JComboBox<String> claudeModel = new JComboBox<>(new String[]{"sonnet", "opus", "haiku"});
         claudeModel.setSelectedItem(c.claudeModel);
 
@@ -679,6 +835,9 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         Ui.row(form, "client.jar 1.7.10:", mcJar);
         Ui.row(form, "Claude CLI:", claudeExe);
         Ui.row(form, "Модель по умолчанию:", claudeModel);
+        Ui.row(form, "Хранить версий на вкладку:", keep);
+        Ui.row(form, "Автокопия каждые, минут:", autoMinutes);
+        Ui.rowFull(form, onSave);
 
         if (JOptionPane.showConfirmDialog(this, form, "Настройки",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) return;
@@ -689,6 +848,9 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         c.mcClientJar = mcJar.getText().trim();
         c.claudeExe = claudeExe.getText().trim();
         c.claudeModel = (String) claudeModel.getSelectedItem();
+        c.backupKeep = ((Number) keep.getValue()).intValue();
+        c.autoBackupMinutes = ((Number) autoMinutes.getValue()).intValue();
+        c.backupOnSave = onSave.isSelected();
         c.save();
 
         ModAssets.get().reopen();
@@ -739,14 +901,16 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         }).start();
     }
 
+    /**
+     * Автоматическая копия, пока есть несохранённые правки: даже если программа
+     * закроется неожиданно, работа найдётся в истории версий.
+     */
     private void startAutosaveTimer() {
-        new Timer(30_000, e -> {
+        int minutes = Config.get().autoBackupMinutes;
+        if (minutes <= 0) return;
+        new Timer(minutes * 60_000, e -> {
             if (!model.isDirty()) return;
-            File dir = Config.get().propertiesFile().getParentFile();
-            File draft = new File(dir, "autosave.json");
-            try {
-                Files.write(draft.toPath(), model.tab().toJsonString().getBytes(StandardCharsets.UTF_8));
-            } catch (IOException ignored) { }
+            backup(Backups.Reason.AUTO);
         }).start();
     }
 
@@ -791,15 +955,25 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
     }
 
     private boolean confirmDiscard() {
+        return confirmDiscard(Backups.Reason.BEFORE_OPEN);
+    }
+
+    /**
+     * Спросить про несохранённые правки. При отказе сохранять копия всё равно
+     * уходит в историю версий — потерять работу по ошибке нельзя.
+     */
+    private boolean confirmDiscard(Backups.Reason reason) {
         if (!model.isDirty()) return true;
         int answer = JOptionPane.showConfirmDialog(this,
-                "Есть несохранённые изменения. Сохранить?", "DwQuests Editor",
-                JOptionPane.YES_NO_CANCEL_OPTION);
+                "Есть несохранённые изменения. Сохранить?" + "\n"
+                        + "Если нет — состояние всё равно попадёт в историю версий.",
+                "DwQuests Editor", JOptionPane.YES_NO_CANCEL_OPTION);
         if (answer == JOptionPane.CANCEL_OPTION || answer == JOptionPane.CLOSED_OPTION) return false;
         if (answer == JOptionPane.YES_OPTION) {
             save();
             return !model.isDirty();
         }
+        backup(reason);
         return true;
     }
 
@@ -866,9 +1040,20 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
             model.setTab(TabIO.load(f), f, false);
             selectFirstQuest();
             canvas.fitToContent();
+            if (f.getParentFile() != null) {
+                workspace.open(f.getParentFile());
+                projectPanel.refresh();
+                projectPanel.setCurrentFile(f);
+            }
         } catch (Exception e) {
             status("Не удалось открыть " + f.getName() + ": " + e.getMessage());
         }
+    }
+
+    /** Текущая страница — чтобы замерять её отрисовку отдельно от всего окна. */
+    public JComponent pageForProbe() {
+        JComponent page = tabs.getSelectedPage();
+        return page == null ? canvas : page;
     }
 
     /** Переключить раздел из кода — используется отладочным UiProbe. */

@@ -68,6 +68,13 @@ public class EditorCanvas extends JComponent {
     private boolean showGrid = true;
     private boolean snap = true;
     private boolean showNames = true;
+    private boolean showLinks = true;
+    // HIDDEN-связи в игре не рисуются вовсе, но в редакторе их надо видеть —
+    // как в веб-редакторе, тонкой линией, чтобы не забивали карту
+    private boolean showHiddenLinks = true;
+
+    /** Границы видимой области в координатах мира — считаются раз на кадр. */
+    private float viewLeft, viewTop, viewRight, viewBottom;
 
     // перетаскивание
     private boolean dragNodes;
@@ -154,6 +161,14 @@ public class EditorCanvas extends JComponent {
     public boolean isShowNames() { return showNames; }
 
     public void setShowNames(boolean v) { showNames = v; repaint(); }
+
+    public boolean isShowLinks() { return showLinks; }
+
+    public void setShowLinks(boolean v) { showLinks = v; repaint(); }
+
+    public boolean isShowHiddenLinks() { return showHiddenLinks; }
+
+    public void setShowHiddenLinks(boolean v) { showHiddenLinks = v; repaint(); }
 
     public float getZoom() { return zoom; }
 
@@ -254,18 +269,35 @@ public class EditorCanvas extends JComponent {
         int w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
         if (buffer == null || buffer.getWidth() != w || buffer.getHeight() != h)
-            buffer = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+            // поле закрашивается целиком, прозрачность не нужна: непрозрачный буфер
+            // и рисуется быстрее, и выводится на экран простым копированием
+            buffer = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+
+        viewLeft = camX;
+        viewTop = camY;
+        viewRight = camX + w / zoom;
+        viewBottom = camY + h / zoom;
 
         GuiPainter p = GuiPainter.forImage(buffer, zoom);
+        boolean profile = Boolean.getBoolean("dwq.profile");
+        long t0 = profile ? System.nanoTime() : 0;
+        long t1 = t0, t2 = t0;
         try {
             p.rectOpaque(camX, camY, w / zoom, h / zoom, 0xFF12171E);
             p.translate(-camX, -camY);
             if (showGrid) drawGrid(p, w, h);
-            drawLinks(p);
+            if (profile) t1 = System.nanoTime();
+            if (showLinks) drawLinks(p);
+            if (profile) t2 = System.nanoTime();
             drawNodes(p);
             drawPendingLink(p);
         } finally {
             p.dispose();
+        }
+        if (profile) {
+            long t3 = System.nanoTime();
+            System.out.printf("канвас: сетка %d мс, связи %d мс, узлы %d мс, зум %.2f%n",
+                    (t1 - t0) / 1000000, (t2 - t1) / 1000000, (t3 - t2) / 1000000, zoom);
         }
 
         Graphics2D g = (Graphics2D) g0;
@@ -305,7 +337,9 @@ public class EditorCanvas extends JComponent {
             p.rect(left, y, right - left, px, 0x14FFFFFF);
         }
 
-        if (step * zoom >= 10) {
+        // точки мелкой сетки рисуем, только когда их немного и они различимы
+        long dots = (long) (maxI - minI + 1) * (maxJ - minJ + 1);
+        if (step * zoom >= 12 && dots <= 6000) {
             float dot = Math.max(px, 1.5f / zoom);
             for (int i = minI; i <= maxI; i++) {
                 for (int j = minJ; j <= maxJ; j++) {
@@ -322,29 +356,51 @@ public class EditorCanvas extends JComponent {
 
     private void drawLinks(GuiPainter p) {
         QuestTab tab = model.tab();
-        for (Quest q : tab.quests.values()) {
-            for (Parent parent : q.parents) {
-                if (parent.questID == null) continue;
-                if (parent.tabID != null && !parent.tabID.isEmpty() && !parent.tabID.equals(tab.tabID)) continue;
-                Quest pq = tab.quests.get(parent.questID);
-                if (pq == null) continue;
-                float x1 = pq.displayX * CELL + 12f;
-                float y1 = pq.displayY * CELL + 12f;
-                float x2 = q.displayX * CELL + 12f;
-                float y2 = q.displayY * CELL + 12f;
-                int color = Defs.Star.of(q.rarity).mainColor;
-                int parentColor = Defs.Star.of(pq.rarity).mainColor;
-                if (parent.parentType == Defs.ParentType.HIDDEN) {
-                    color = 0x555555;
-                    parentColor = 0x555555;
-                } else if (parent.parentType == Defs.ParentType.FAKE) {
-                    color = ru.dw.qeditor.render.Fx.lerpRgb(color, 0x888888, 0.5f);
-                    parentColor = ru.dw.qeditor.render.Fx.lerpRgb(parentColor, 0x888888, 0.5f);
+        // в игре толщина линии задаётся в пикселях экрана, а не карты
+        float width = 1.6f;
+        boolean gradient = LinkRenderer.gradientWorthIt(zoom);
+        boolean antialias = zoom >= 0.35f;
+
+        try (LinkRenderer.Batch batch = LinkRenderer.batch(p, width, antialias, gradient)) {
+            java.awt.Stroke thin = batch.plain(0.7f);
+            for (Quest q : tab.quests.values()) {
+                if (q.parents.isEmpty()) continue;
+                for (Parent parent : q.parents) {
+                    if (parent.questID == null) continue;
+                    if (parent.tabID != null && !parent.tabID.isEmpty()
+                            && !parent.tabID.equals(tab.tabID)) continue;
+                    boolean hidden = parent.parentType == Defs.ParentType.HIDDEN;
+                    if (hidden && !showHiddenLinks) continue;
+                    Quest pq = tab.quests.get(parent.questID);
+                    if (pq == null) continue;
+
+                    float x1 = pq.displayX * CELL + 12f;
+                    float y1 = pq.displayY * CELL + 12f;
+                    float x2 = q.displayX * CELL + 12f;
+                    float y2 = q.displayY * CELL + 12f;
+                    if (!linkVisible(x1, y1, x2, y2)) continue;
+
+                    int color = Defs.Star.of(q.rarity).mainColor;
+                    int parentColor = Defs.Star.of(pq.rarity).mainColor;
+                    // FAKE в игре рисуется обычной линией, отличается только логикой;
+                    // HIDDEN в игре не рисуется, здесь показываем его тонким и тусклым
+                    if (hidden) color = parentColor = 0x46525F;
+                    batch.line(x1, y1, x2, y2, color, parentColor, false,
+                            parent.lineType, 0, hidden ? thin : null);
                 }
-                LinkRenderer.draw(p, x1, y1, x2, y2, color, parentColor, false,
-                        parent.lineType, 0, Math.max(1f, 2.5f / zoom));
             }
         }
+    }
+
+    /** Пересекает ли связь видимую область (с запасом на выгиб дуги). */
+    private boolean linkVisible(float x1, float y1, float x2, float y2) {
+        float dist = Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2));
+        float margin = dist * 0.5f + CELL;
+        float left = Math.min(x1, x2) - margin;
+        float right = Math.max(x1, x2) + margin;
+        float top = Math.min(y1, y2) - margin;
+        float bottom = Math.max(y1, y2) + margin;
+        return right >= viewLeft && left <= viewRight && bottom >= viewTop && top <= viewBottom;
     }
 
     private void drawNodes(GuiPainter p) {
@@ -352,6 +408,10 @@ public class EditorCanvas extends JComponent {
         for (Quest q : tab.quests.values()) {
             float x = q.displayX * CELL;
             float y = q.displayY * CELL;
+            // ореол узла выходит далеко за клетку — берём запас
+            float margin = 40f * q.iconSize.scale;
+            if (x + CELL + margin < viewLeft || x - margin > viewRight
+                    || y + CELL + margin < viewTop || y - margin > viewBottom) continue;
             boolean selected = model.selection().contains(q.questID);
 
             p.questStar(x, y, CELL, CELL, q.iconSize.scale, Defs.Star.of(q.rarity),
@@ -372,7 +432,7 @@ public class EditorCanvas extends JComponent {
                 g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
                         aa == null ? java.awt.RenderingHints.VALUE_ANTIALIAS_OFF : aa);
             }
-            if (showNames && zoom >= 0.5f) {
+            if (showNames && zoom >= 0.6f) {
                 String name = q.displayNameOrID();
                 float ty = y + CELL + 3;
                 int w = McFont.get().width(name);
@@ -390,7 +450,7 @@ public class EditorCanvas extends JComponent {
         float y1 = from.displayY * CELL + 12f;
         LinkRenderer.draw(p, x1, y1, lastWorldX, lastWorldY,
                 0xFFFFFF, Defs.Star.of(from.rarity).mainColor, false,
-                Defs.LineType.DEFAULT, 0, Math.max(1f, 2.5f / zoom));
+                Defs.LineType.DEFAULT, 0, 2f / zoom);
     }
 
     // ------------------------------------------------------------------ мышь
