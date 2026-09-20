@@ -43,6 +43,10 @@ public class GamePreview {
     private static final int SCROLL_STEP = 40;
 
     private QuestTab tab;
+    /** Все вкладки папки — левая колонка показывает их так же, как игра. */
+    private final List<QuestTab> allTabs = new ArrayList<>();
+    private float tabListScroll;
+    private java.util.function.Consumer<QuestTab> onTabSwitched;
     private Mode mode = Mode.COMPLETED;
     private float guiScale = 2f;
 
@@ -85,6 +89,13 @@ public class GamePreview {
 
     // ------------------------------------------------------------------ состояние
 
+    /** Показать одну вкладку (список слева будет из неё одной). */
+    public void setSingleTab(QuestTab tab) {
+        allTabs.clear();
+        if (tab != null) allTabs.add(tab);
+        setTab(tab);
+    }
+
     public void setTab(QuestTab tab) {
         boolean changed = this.tab != tab;
         this.tab = tab;
@@ -95,6 +106,35 @@ public class GamePreview {
             panelScroll = 0;
             mapInitialized = false;
         }
+    }
+
+    /**
+     * Показать все вкладки папки: слева появится их список, как в игре,
+     * и между ними можно переключаться прямо в просмотре.
+     *
+     * @param tabs     вкладки; открытую в редакторе передавать живым объектом,
+     *                 чтобы просмотр видел несохранённые правки
+     * @param selected tabID выбранной вкладки
+     */
+    public void setTabs(List<QuestTab> tabs, String selected) {
+        allTabs.clear();
+        if (tabs != null) allTabs.addAll(tabs);
+        allTabs.sort(java.util.Comparator.comparingInt(t -> t.sortIndex));
+
+        QuestTab found = null;
+        for (QuestTab t : allTabs) {
+            if (t.tabID != null && t.tabID.equals(selected)) { found = t; break; }
+        }
+        if (found == null && !allTabs.isEmpty()) found = allTabs.get(0);
+        if (found != null) setTab(found);
+        tabListScroll = 0;
+    }
+
+    public List<QuestTab> getTabs() { return allTabs; }
+
+    /** Сообщать наружу, когда вкладку переключили в самом просмотре. */
+    public void setOnTabSwitched(java.util.function.Consumer<QuestTab> listener) {
+        this.onTabSwitched = listener;
     }
 
     public QuestTab getTab() { return tab; }
@@ -472,8 +512,10 @@ public class GamePreview {
     // ------------------------------------------------------------------ левая колонка
 
     private void drawTabButtons(GuiPainter p) {
-        int tabsCount = tab == null ? 0 : 1;
+        int tabsCount = Math.max(1, allTabs.size());
         int contentHeight = Math.max(210 + tabsCount * 30, tabH);
+        float maxScroll = Math.max(0, contentHeight - tabH);
+        if (tabListScroll > maxScroll) tabListScroll = maxScroll;
 
         p.push();
         p.clip(tabX, tabY, tabW + 14, tabH);
@@ -489,6 +531,18 @@ public class GamePreview {
         int completed = 0;
         if (tab != null) for (Quest q : tab.quests.values()) if (questCompleted(q)) completed++;
 
+        // «Общий прогресс» в игре считается по всем вкладкам сразу
+        int allTotal = 0;
+        int allCompleted = 0;
+        for (QuestTab t : allTabs) {
+            allTotal += t.quests.size();
+            for (Quest q : t.quests.values()) if (questCompleted(q)) allCompleted++;
+        }
+        if (allTabs.isEmpty()) {
+            allTotal = total;
+            allCompleted = completed;
+        }
+
         if (tab != null) {
             p.textCentered(tab.tabID + ":", centerX, tabY + 15, -1, true);
             p.textCentered(completed + " / " + total, centerX, tabY + 30, -1, true);
@@ -496,21 +550,48 @@ public class GamePreview {
         progressBar(p, tabX + 10f, tabY + 45f, tabW - 20, 10, completed, total);
 
         p.textCentered("Общий прогресс:", centerX, tabY + 70, -1, true);
-        p.textCentered(completed + " / " + total, centerX, tabY + 85, -1, true);
-        progressBar(p, tabX + 10f, tabY + 100f, tabW - 20, 10, completed, total);
+        p.textCentered(allCompleted + " / " + allTotal, centerX, tabY + 85, -1, true);
+        progressBar(p, tabX + 10f, tabY + 100f, tabW - 20, 10, allCompleted, allTotal);
 
         button(p, tabX + 10f, tabY + 120f, tabW - 20, 20, "Сдать все квесты", "minecraft:paper", true, false);
         button(p, tabX + 10f, tabY + 150f, tabW - 20, 20, "Забрать все награды", "minecraft:hopper", true, false);
 
-        if (tab != null) {
-            button(p, tabX + 10f + 10f, tabY + 185f, tabW - 8, 20, tab.tabID, tab.iconItem, true, true);
+        // список вкладок: выбранная сдвинута вправо, как в моде
+        p.push();
+        p.translate(0, -tabListScroll);
+        for (int i = 0; i < allTabs.size(); i++) {
+            QuestTab t = allTabs.get(i);
+            boolean selected = t == tab;
+            float y = tabY + 185f + i * 30;
+            if (y - tabListScroll > tabY + tabH || y - tabListScroll + 20 < tabY) continue;
+            button(p, tabX + 10f + (selected ? 10f : 0f), y, tabW - 8, 20,
+                    t.tabID == null ? "?" : t.tabID, t.iconItem, true, true);
         }
+        p.pop();
 
         p.pop();
 
         p.lineShadow(tabX, tabY, tabW, 5, 0);
         p.lineShadow(tabX, tabY, 5 + (contentHeight > tabH ? 3 : 0), tabH, -90);
         p.lineShadow(tabX, tabY + tabH - 5f, tabW, 5, 180);
+    }
+
+    /** Вкладка под курсором в левой колонке либо null. */
+    private QuestTab tabButtonAt(float vx, float vy) {
+        if (vx < tabX || vx > tabX + tabW + 14) return null;
+        for (int i = 0; i < allTabs.size(); i++) {
+            QuestTab t = allTabs.get(i);
+            boolean selected = t == tab;
+            float x = tabX + 10f + (selected ? 10f : 0f);
+            float y = tabY + 185f + i * 30 - tabListScroll;
+            if (y < tabY || y > tabY + tabH) continue;
+            if (vx >= x && vx < x + tabW - 8 && vy >= y && vy < y + 20) return t;
+        }
+        return null;
+    }
+
+    private boolean overTabColumn(float vx, float vy) {
+        return vx >= tabX && vx <= tabX + tabW + 14 && vy >= tabY && vy <= tabY + tabH;
     }
 
     /** UIProgressBar */
@@ -1030,6 +1111,15 @@ public class GamePreview {
             return false;
         }
 
+        QuestTab clickedTab = tabButtonAt(vx, vy);
+        if (clickedTab != null) {
+            if (clickedTab != tab) {
+                setTab(clickedTab);
+                if (onTabSwitched != null) onTabSwitched.accept(clickedTab);
+            }
+            return true;
+        }
+
         if (button == 1) {
             String hit = questAt(vx, vy);
             if (hit != null) {
@@ -1068,6 +1158,12 @@ public class GamePreview {
         if (openQuestID != null) {
             int maxScroll = Math.max(0, panelContentHeight - panelH());
             panelScroll = Math.max(0, Math.min(maxScroll, panelScroll + rotation * SCROLL_STEP));
+            return;
+        }
+        if (overTabColumn(vx, vy)) {
+            int contentHeight = Math.max(210 + Math.max(1, allTabs.size()) * 30, tabH);
+            float maxScroll = Math.max(0, contentHeight - tabH);
+            tabListScroll = Math.max(0, Math.min(maxScroll, tabListScroll + rotation * 30));
             return;
         }
         if (vx < bx || vx >= bx + bw || vy < by || vy >= by + bh) return;

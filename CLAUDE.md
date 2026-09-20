@@ -101,8 +101,13 @@ java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.cli.QuestCli validate Botania.j
   картинку без трансформации.
 * Узлы и связи за пределами экрана пропускаются.
 
+* Буфер поля живёт между кадрами, поэтому фон надо заливать **после** сдвига
+  камеры — иначе заливка уходит мимо буфера и остаются «призраки» прошлого кадра.
+  Это ловит `GhostCheck`.
+
 Замер: `java -cp out ru.dw.qeditor.util.Bench вкладка.json 10`,
 подробности по этапам — с `-Ddwq.profile=true`.
+Проверка полной перерисовки: `java -cp out ru.dw.qeditor.util.GhostCheck вкладка.json`.
 
 ## Проверка вида
 

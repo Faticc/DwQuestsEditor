@@ -204,6 +204,13 @@ public class EditorCanvas extends JComponent {
         repaint();
     }
 
+    /** Поставить камеру в заданную точку мира — нужно проверке отрисовки. */
+    public void panToForProbe(float worldX, float worldY) {
+        camX = worldX;
+        camY = worldY;
+        repaint();
+    }
+
     public void centerOn(String questID) {
         Quest q = model.tab().quests.get(questID);
         if (q == null) return;
@@ -283,8 +290,10 @@ public class EditorCanvas extends JComponent {
         long t0 = profile ? System.nanoTime() : 0;
         long t1 = t0, t2 = t0;
         try {
-            p.rectOpaque(camX, camY, w / zoom, h / zoom, 0xFF12171E);
+            // сдвиг камеры до заливки: иначе фон ложится мимо буфера и от
+            // прошлого кадра остаются «призраки» подписей и сетки
             p.translate(-camX, -camY);
+            p.rectOpaque(camX, camY, w / zoom + 1, h / zoom + 1, 0xFF12171E);
             if (showGrid) drawGrid(p, w, h);
             if (profile) t1 = System.nanoTime();
             if (showLinks) drawLinks(p);

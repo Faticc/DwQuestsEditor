@@ -90,6 +90,9 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         model.addListener(this);
         canvas.setCallbacks(new CanvasCallbacks());
         previewPanel.preview().setGuiScale(Config.get().guiScale);
+        previewPanel.preview().setOnTabSwitched(t ->
+                status("Просмотр: " + t.tabID + ", квестов: " + t.quests.size()
+                        + "   •   правится по-прежнему " + model.tab().tabID));
         previewPanel.setOnQuestOpened(() -> {
             String id = previewPanel.preview().getOpenQuestID();
             if (id != null) model.select(id);
@@ -917,7 +920,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
     private void onTabChanged() {
         boolean preview = tabs.getSelectedIndex() == 1;
         if (preview) {
-            previewPanel.preview().setTab(model.tab());
+            feedPreviewTabs();
             String id = model.single();
             if (id != null) previewPanel.preview().openQuest(id);
             previewPanel.start();
@@ -926,13 +929,43 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         }
     }
 
+    /**
+     * Отдать просмотру все вкладки папки — левая колонка тогда выглядит как в
+     * игре. Открытая в редакторе вкладка передаётся живым объектом, чтобы были
+     * видны несохранённые правки; остальные читаются с диска.
+     */
+    private void feedPreviewTabs() {
+        java.util.List<QuestTab> list = new ArrayList<>();
+        if (workspace.isOpen()) {
+            File current = model.file();
+            for (Workspace.Entry e : workspace.entries()) {
+                if (e.error != null) continue;
+                if (current != null && e.file.getAbsolutePath().equals(current.getAbsolutePath())) {
+                    list.add(model.tab());
+                    continue;
+                }
+                try {
+                    list.add(TabIO.load(e.file));
+                } catch (Exception ignored) {
+                    // вкладка не читается — просто не показываем её в списке
+                }
+            }
+        }
+        if (list.isEmpty()) {
+            previewPanel.preview().setSingleTab(model.tab());
+        } else {
+            if (!list.contains(model.tab())) list.add(model.tab());
+            previewPanel.preview().setTabs(list, model.tab().tabID);
+        }
+    }
+
     // ------------------------------------------------------------------ модель
 
     @Override
     public void modelChanged(String what) {
         updateTitle();
-        if ("tab".equals(what)) {
-            previewPanel.preview().setTab(model.tab());
+        if ("tab".equals(what) && previewPanel.isRunning()) {
+            feedPreviewTabs();
         }
         if (undoItem != null) {
             undoItem.setEnabled(model.history().canUndo());
@@ -1018,9 +1051,8 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         @Override
         public void questDoubleClicked(String questID) {
             model.select(questID);
-            previewPanel.preview().setTab(model.tab());
-            previewPanel.preview().openQuest(questID);
             tabs.setSelectedIndex(1);
+            previewPanel.preview().openQuest(questID);
         }
 
         @Override public void requestAddQuest(float x, float y) { addQuest(x, y); }
@@ -1049,6 +1081,9 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
             status("Не удалось открыть " + f.getName() + ": " + e.getMessage());
         }
     }
+
+    /** Поле редактора — для проверок отрисовки. */
+    public EditorCanvas canvasForProbe() { return canvas; }
 
     /** Текущая страница — чтобы замерять её отрисовку отдельно от всего окна. */
     public JComponent pageForProbe() {
