@@ -26,6 +26,8 @@ public final class UiProbe {
         int tabIndex = args.length > 2 ? Integer.parseInt(args[2]) : 0;
         int width = args.length > 3 ? Integer.parseInt(args[3]) : 1600;
         int height = args.length > 4 ? Integer.parseInt(args[4]) : 1000;
+        // пятым аргументом "full" — снимок без боковых панелей, как в полном экране
+        boolean chromeless = args.length > 5 && "full".equals(args[5]);
 
         Theme.install();
 
@@ -41,6 +43,7 @@ public final class UiProbe {
 
         if (tabFile != null) SwingUtilities.invokeAndWait(() -> frame.openFileForProbe(new File(tabFile)));
         SwingUtilities.invokeAndWait(() -> frame.selectTabForProbe(tabIndex));
+        if (chromeless) SwingUtilities.invokeAndWait(() -> frame.setChromeForProbe(false));
 
         // дать таймерам, раскладке и первому кадру отработать
         Thread.sleep(1200);

@@ -118,7 +118,13 @@ java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.SelfTest
 java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.PainterProbe probe.png
 java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.PreviewProbe .
 java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.UiProbe ui.png вкладка.json 0
+java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.UiProbe ui.png вкладка.json 1 1920 1080 full
 ```
+
+Проверки механики: `FullscreenCheck` (полный экран туда-обратно, запускать с
+`-Ddwq.nofullscreen=true`, чтобы не перехватывать экран) и `GhostCheck`.
+Тем же ключом можно отключить захват экрана в самой программе, если полный
+экран где-то ведёт себя плохо.
 
 `UiProbe` выносит окно за пределы экрана и печатает его в PNG — им можно сверять
 интерфейс, не мешая тому, что открыто на экране.

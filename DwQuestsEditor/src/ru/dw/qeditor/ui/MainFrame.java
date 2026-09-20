@@ -50,6 +50,9 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.GraphicsDevice;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.Font;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
@@ -78,6 +81,12 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
     private final JLabel statusBar = new JLabel(" ");
 
     private JSplitPane projectSplit;
+    private JSplitPane sidebarSplit;
+    private JPanel statusWrap;
+    private JMenuBar menuBar;
+    private boolean fullscreen;
+    private Rectangle windowedBounds;
+    private int windowedState;
     private JMenuItem undoItem;
     private JMenuItem redoItem;
 
@@ -109,6 +118,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         projectPanel.setOnChooseFolder(this::openFolder);
 
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, tabs, sidebar);
+        this.sidebarSplit = split;
         split.setResizeWeight(1);
         split.setDividerLocation(840);
         split.setBorder(null);
@@ -126,7 +136,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         statusBar.setBorder(Theme.padding(6, 16, 6, 16));
         statusBar.setForeground(Theme.TEXT_MUTED);
         statusBar.setFont(Theme.font(Theme.FONT_SIZE_SMALL + 1));
-        JPanel statusWrap = new JPanel(new BorderLayout());
+        statusWrap = new JPanel(new BorderLayout());
         statusWrap.setBackground(Theme.SURFACE);
         statusWrap.setBorder(Theme.topLine());
         statusWrap.add(statusBar, BorderLayout.CENTER);
@@ -136,10 +146,11 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         add(withProject, BorderLayout.CENTER);
         add(statusWrap, BorderLayout.SOUTH);
 
-        JMenuBar menuBar = buildMenu();
+        menuBar = buildMenu();
         menuBar.setBackground(Theme.SURFACE);
         menuBar.setBorder(Theme.bottomLine());
         setJMenuBar(menuBar);
+        installFullscreenKeys();
 
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent e) { exit(); }
@@ -220,6 +231,8 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         bar.add(toggle("скрытые", false, canvas::setShowHiddenLinks));
         bar.add(separator());
 
+        bar.add(FlatButton.ghost("Во весь экран", this::toggleFullscreen).small()
+                .tip("F11 — развернуть поле на весь экран, Esc — вернуться"));
         bar.add(FlatButton.ghost("Вписать", canvas::fitToContent).small());
         bar.add(FlatButton.ghost("Разложить сеткой", this::autoLayout).small());
         bar.add(separator());
@@ -296,6 +309,8 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         mb.add(edit);
 
         JMenu view = new JMenu("Вид");
+        view.add(item("Во весь экран (F11)", 0, this::toggleFullscreen));
+        view.addSeparator();
         view.add(item("Вписать вкладку", 0, canvas::fitToContent));
         view.add(item("К выбранному квесту", 0, () -> {
             String id = model.single();
@@ -873,6 +888,104 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
             problems.add("Не загружен список предметов: " + ItemRegistry.get().loadError());
         if (problems.isEmpty()) return;
         status("Проблемы с ресурсами: " + problems.size() + " — Инструменты → Настройки");
+    }
+
+    // ------------------------------------------------------------------ полный экран
+
+    /**
+     * F11 переключает полный экран, Esc из него выходит. Привязка на весь окно:
+     * фокус может быть где угодно — в поле, в просмотре, в списке вкладок.
+     */
+    private void installFullscreenKeys() {
+        JComponent root = getRootPane();
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_F11, 0), "fullscreen");
+        root.getActionMap().put("fullscreen", new javax.swing.AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { toggleFullscreen(); }
+        });
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "exitFullscreen");
+        root.getActionMap().put("exitFullscreen", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (fullscreen) toggleFullscreen();
+            }
+        });
+    }
+
+    /**
+     * Во весь экран остаётся только сама карта: панели, меню и строка состояния
+     * прячутся, полоска разделов сверху — нет, чтобы можно было переключаться
+     * между редактором и просмотром не выходя из режима.
+     */
+    public void toggleFullscreen() {
+        GraphicsDevice device = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
+
+        if (!fullscreen) {
+            windowedBounds = getBounds();
+            windowedState = getExtendedState();
+            fullscreen = true;
+            setChromeVisible(false);
+
+            // настоящий полный экран возможен только без рамки окна, а сменить
+            // её у показанного окна можно лишь пересоздав его
+            dispose();
+            setUndecorated(true);
+            // -Ddwq.nofullscreen=true — не захватывать экран: нужно проверкам,
+            // а заодно запасной выход, если полный экран где-то ведёт себя плохо
+            boolean grabScreen = !Boolean.getBoolean("dwq.nofullscreen");
+            if (grabScreen && device.isFullScreenSupported()) {
+                device.setFullScreenWindow(this);
+            } else {
+                setVisible(true);
+                if (grabScreen) setExtendedState(MAXIMIZED_BOTH);
+            }
+            status("Во весь экран. F11 или Esc — вернуться");
+        } else {
+            fullscreen = false;
+            setChromeVisible(true);
+
+            // сначала отпускаем экран, и только потом трогаем рамку
+            if (device.getFullScreenWindow() == this) device.setFullScreenWindow(null);
+            dispose();
+            setUndecorated(false);
+            setVisible(true);
+            if (windowedBounds != null) {
+                setExtendedState(windowedState);
+                if (windowedState == NORMAL) setBounds(windowedBounds);
+            }
+            status("Обычный режим");
+        }
+
+        revalidate();
+        repaint();
+        requestFocusInWindow();
+    }
+
+    /** Спрятать обвязку без захвата экрана — для снимков и проверок. */
+    public void setChromeForProbe(boolean visible) {
+        setChromeVisible(visible);
+        revalidate();
+        repaint();
+    }
+
+    /** Показать или спрятать всё, кроме самой страницы. */
+    private void setChromeVisible(boolean visible) {
+        setJMenuBar(visible ? menuBar : null);
+        statusWrap.setVisible(visible);
+        projectPanel.setVisible(visible);
+        sidebar.setVisible(visible);
+
+        projectSplit.setDividerSize(visible ? 6 : 0);
+        sidebarSplit.setDividerSize(visible ? 6 : 0);
+        if (visible) {
+            projectSplit.setDividerLocation(230);
+            sidebarSplit.setDividerLocation(Math.max(600, getWidth() - 430));
+        } else {
+            projectSplit.setDividerLocation(0);
+            sidebarSplit.setDividerLocation(Integer.MAX_VALUE);
+        }
+        tabs.setBorder(Theme.padding(0, visible ? 16 : 8, 0, 8));
     }
 
     // ------------------------------------------------------------------ фоновые задачи
