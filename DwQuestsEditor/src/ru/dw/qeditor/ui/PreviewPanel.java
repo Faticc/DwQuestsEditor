@@ -18,6 +18,15 @@ public class PreviewPanel extends JComponent {
     private BufferedImage buffer;
     private Runnable onQuestOpened;
 
+    /** Масштаб окна мода, как его задал пользователь (аналог guiScale в игре). */
+    private float guiScale = 2f;
+    /**
+     * Во сколько раз рисовать мельче экрана. 1 — пиксель в пиксель; 0.5 —
+     * вчетверо меньше точек, потом растягиваем. Раскладка при этом та же,
+     * меняется только чёткость кругов и линий.
+     */
+    private float renderScale = 1f;
+
     public PreviewPanel() {
         setFocusable(true);
         // 20 кадров в секунду = один игровой тик на кадр: так совпадает скорость
@@ -89,21 +98,52 @@ public class PreviewPanel extends JComponent {
 
     public boolean isRunning() { return timer.isRunning(); }
 
-    private float vx(int screenX) { return screenX / preview.getGuiScale(); }
+    /** Экранные координаты → пиксели GUI. Считаем по заданному масштабу, а не
+     *  по внутреннему: при быстром режиме тот вдвое меньше. */
+    private float vx(int screenX) { return screenX / guiScale; }
 
-    private float vy(int screenY) { return screenY / preview.getGuiScale(); }
+    private float vy(int screenY) { return screenY / guiScale; }
+
+    public void setGuiScale(float scale) {
+        this.guiScale = Math.max(1f, Math.min(4f, scale));
+        buffer = null;
+        repaint();
+    }
+
+    public float getGuiScale() { return guiScale; }
+
+    public boolean isFastMode() { return renderScale < 1f; }
+
+    /** Быстрый режим: рисуем вдвое мельче и растягиваем. */
+    public void setFastMode(boolean fast) {
+        renderScale = fast ? 0.5f : 1f;
+        buffer = null;
+        repaint();
+    }
 
     @Override
     protected void paintComponent(Graphics g) {
         int w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
-        if (buffer == null || buffer.getWidth() != w || buffer.getHeight() != h)
+
+        int bw = Math.max(1, Math.round(w * renderScale));
+        int bh = Math.max(1, Math.round(h * renderScale));
+        if (buffer == null || buffer.getWidth() != bw || buffer.getHeight() != bh)
             // поле закрашивается целиком, прозрачность не нужна: непрозрачный буфер
             // и рисуется быстрее, и выводится на экран простым копированием
-            buffer = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+            buffer = new BufferedImage(bw, bh, BufferedImage.TYPE_INT_RGB);
+
         long start = System.nanoTime();
+        preview.setGuiScale(guiScale * renderScale);
         preview.render(buffer);
-        g.drawImage(buffer, 0, 0, null);
+        if (bw == w && bh == h) {
+            g.drawImage(buffer, 0, 0, null);
+        } else {
+            ((java.awt.Graphics2D) g).setRenderingHint(
+                    java.awt.RenderingHints.KEY_INTERPOLATION,
+                    java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g.drawImage(buffer, 0, 0, w, h, null);
+        }
         adjustRate((System.nanoTime() - start) / 1_000_000);
     }
 }

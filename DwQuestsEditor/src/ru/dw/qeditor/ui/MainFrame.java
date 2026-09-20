@@ -98,7 +98,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
 
         model.addListener(this);
         canvas.setCallbacks(new CanvasCallbacks());
-        previewPanel.preview().setGuiScale(Config.get().guiScale);
+        previewPanel.setGuiScale(Config.get().guiScale);
         previewPanel.preview().setOnTabSwitched(t ->
                 status("Просмотр: " + t.tabID + ", квестов: " + t.quests.size()
                         + "   •   правится по-прежнему " + model.tab().tabID));
@@ -226,7 +226,7 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
 
         bar.add(toggle("сетка", true, canvas::setShowGrid));
         bar.add(toggle("привязка", true, canvas::setSnap));
-        bar.add(toggle("имена", true, canvas::setShowNames));
+        bar.add(toggle("все имена", false, canvas::setShowNames));
         bar.add(toggle("связи", true, canvas::setShowLinks));
         bar.add(toggle("скрытые", false, canvas::setShowHiddenLinks));
         bar.add(separator());
@@ -252,10 +252,17 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
         scale.addChangeListener(e -> {
             int v = ((Number) scale.getValue()).intValue();
             Config.get().guiScale = v;
-            previewPanel.preview().setGuiScale(v);
+            previewPanel.setGuiScale(v);
             previewPanel.repaint();
         });
         bar.add(scale);
+
+        bar.add(toggle("быстро", false, fast -> {
+            previewPanel.setFastMode(fast);
+            status(fast
+                    ? "Быстрый режим: просмотр рисуется вдвое мельче и растягивается"
+                    : "Чёткий режим: просмотр рисуется пиксель в пиксель");
+        }));
 
         return bar;
     }
@@ -1194,6 +1201,15 @@ public class MainFrame extends JFrame implements EditorModel.Listener {
             status("Не удалось открыть " + f.getName() + ": " + e.getMessage());
         }
     }
+
+    /** Прокрутить список вкладок в просмотре — для проверки. */
+    public void scrollPreviewTabsForProbe() {
+        previewPanel.preview().closePanel();
+        previewPanel.preview().onWheel(60, 200, 2);
+    }
+
+    /** Быстрый режим просмотра — для замеров. */
+    public void setFastModeForProbe(boolean fast) { previewPanel.setFastMode(fast); }
 
     /** Поле редактора — для проверок отрисовки. */
     public EditorCanvas canvasForProbe() { return canvas; }

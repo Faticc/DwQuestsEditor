@@ -49,6 +49,13 @@ public final class GuiPainter {
     /** UtilsFX.renderAnimatedQuadStrip(..., alpha = 0.66F, ...) */
     private static final float NODE_ALPHA = 0.66F;
 
+    /**
+     * Крупнее этого спрайт нода не собираем. Свечение — мягкое пятно без
+     * мелких деталей, на экране растяжение незаметно, зато пересборка кадра
+     * анимации (а он меняется каждый тик) стоит втрое дешевле.
+     */
+    private static final int NODE_SPRITE_MAX = 160;
+
     private final Graphics2D g;
     private final boolean ownsGraphics;
 
@@ -480,12 +487,12 @@ public final class GuiPainter {
         int cframe = NODE_FRAMES - 1 - part;
 
         int dev = Math.max(1, Math.round(size * deviceScale()));
-        BufferedImage sprite = nodeSprite(second, strip, cframe, color, dev);
+        BufferedImage sprite = nodeSprite(second, strip, cframe, color, Math.min(dev, NODE_SPRITE_MAX));
         if (sprite == null) return;
 
         float x = cx - size / 2f;
         float y = cy - size / 2f;
-        if (additive) additiveBlit(sprite, x, y, size, size);
+        if (additive) additiveBlit(sprite, x, y, dev, dev);
         else blit(sprite, x, y, size, size, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
     }
 
@@ -544,11 +551,12 @@ public final class GuiPainter {
      * glBlendFunc(GL_SRC_ALPHA, GL_ONE). Картинка уже в физическом размере и с
      * предумноженной альфой; пишем прямо в пиксели цели.
      */
-    private void additiveBlit(BufferedImage sprite, float x, float y, float width, float height) {
+    private void additiveBlit(BufferedImage sprite, float x, float y, int devW, int devH) {
         if (targetPx == null) {
             java.awt.Composite old = g.getComposite();
             g.setComposite(AdditiveComposite.INSTANCE);
-            blit(sprite, x, y, width, height, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            float scale = deviceScale();
+            blit(sprite, x, y, devW / scale, devH / scale, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             g.setComposite(old);
             return;
         }
@@ -564,17 +572,25 @@ public final class GuiPainter {
 
         int x0 = Math.max(dx, Math.max(0, clip.x));
         int y0 = Math.max(dy, Math.max(0, clip.y));
-        int x1 = Math.min(dx + sw, Math.min(targetW, clip.x + clip.width));
-        int y1 = Math.min(dy + sh, Math.min(targetH, clip.y + clip.height));
+        int x1 = Math.min(dx + devW, Math.min(targetW, clip.x + clip.width));
+        int y1 = Math.min(dy + devH, Math.min(targetH, clip.y + clip.height));
         if (x0 >= x1 || y0 >= y1) return;
 
         int[] src = ((DataBufferInt) sprite.getRaster().getDataBuffer()).getData();
+        // спрайт может быть мельче места на экране — растягиваем ближайшим
+        // соседом в целочисленной арифметике, свечение от этого не страдает
+        int stepX = (int) (((long) sw << 16) / devW);
+        int stepY = (int) (((long) sh << 16) / devH);
 
         for (int yy = y0; yy < y1; yy++) {
-            int sRow = (yy - dy) * sw - dx;
+            int sy = ((yy - dy) * stepY) >> 16;
+            if (sy >= sh) sy = sh - 1;
+            int sRow = sy * sw;
             int dRow = yy * targetW;
             for (int xx = x0; xx < x1; xx++) {
-                int s = src[sRow + xx];
+                int sx = ((xx - dx) * stepX) >> 16;
+                if (sx >= sw) sx = sw - 1;
+                int s = src[sRow + sx];
                 if ((s & 0x00FFFFFF) == 0) continue;
                 int di = dRow + xx;
                 int d = targetPx[di];
@@ -622,37 +638,48 @@ public final class GuiPainter {
         return c;
     }
 
-    private static final int CACHE_LIMIT = 1024;
+    /**
+     * Кэши раздельные не случайно: кадров анимации нода 32 на каждую пару
+     * «тип × цвет», а иконок предметов на большой вкладке под четыре сотни.
+     * В общем кэше они вытесняли друг друга, и каждый второй кадр приходилось
+     * заново собирать все спрайты нодов — отсюда были скачки времени вдвое.
+     */
+    private static Map<String, BufferedImage> lru(int limit) {
+        return new LinkedHashMap<String, BufferedImage>(64, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, BufferedImage> eldest) {
+                return size() > limit;
+            }
+        };
+    }
 
-    private static final Map<String, BufferedImage> CACHE =
-            new LinkedHashMap<String, BufferedImage>(256, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<String, BufferedImage> eldest) {
-                    return size() > CACHE_LIMIT;
-                }
-            };
+    private static final Map<String, BufferedImage> NODE_CACHE = lru(1200);
+    private static final Map<String, BufferedImage> ITEM_CACHE = lru(3000);
+    private static final Map<String, BufferedImage> OUTLINE_CACHE = lru(256);
 
     public static void clearCaches() {
-        CACHE.clear();
+        NODE_CACHE.clear();
+        ITEM_CACHE.clear();
+        OUTLINE_CACHE.clear();
         Fx.clearCaches();
     }
 
     /** Иконка предмета, приведённая к нужному размеру в физических пикселях. */
     private static BufferedImage itemIcon(String forgeName, int devSize) {
-        String key = "item|" + forgeName + "|" + devSize;
-        BufferedImage cached = CACHE.get(key);
+        String key = forgeName + "|" + devSize;
+        BufferedImage cached = ITEM_CACHE.get(key);
         if (cached != null) return cached;
         BufferedImage src = ItemLook.icon(forgeName);
         if (src == null) return null;
         BufferedImage out = resize(src, devSize, devSize);
-        CACHE.put(key, out);
+        ITEM_CACHE.put(key, out);
         return out;
     }
 
     /** Иконка с обводкой: дилатация альфы на outline физических пикселей (outline.frag). */
     private static BufferedImage itemOutlineIcon(String forgeName, int devSize, int color, int outline) {
-        String key = "itemOut|" + forgeName + "|" + devSize + "|" + color + "|" + outline;
-        BufferedImage cached = CACHE.get(key);
+        String key = forgeName + "|" + devSize + "|" + color + "|" + outline;
+        BufferedImage cached = OUTLINE_CACHE.get(key);
         if (cached != null) return cached;
 
         BufferedImage icon = itemIcon(forgeName, devSize);
@@ -686,7 +713,7 @@ public final class GuiPainter {
                 if (near) dst[y * w + x] = oc;
             }
         }
-        CACHE.put(key, out);
+        OUTLINE_CACHE.put(key, out);
         return out;
     }
 
@@ -695,8 +722,8 @@ public final class GuiPainter {
      * растянутая до devSize и с предумноженной альфой (TYPE_INT_ARGB_PRE).
      */
     private static BufferedImage nodeSprite(boolean second, int strip, int cframe, int color, int devSize) {
-        String key = "node|" + (second ? 2 : 1) + "|" + strip + "|" + cframe + "|" + color + "|" + devSize;
-        BufferedImage cached = CACHE.get(key);
+        String key = (second ? 2 : 1) + "|" + strip + "|" + cframe + "|" + color + "|" + devSize;
+        BufferedImage cached = NODE_CACHE.get(key);
         if (cached != null) return cached;
 
         BufferedImage atlas = second ? ModAssets.get().nodes2() : ModAssets.get().nodes();
@@ -738,7 +765,7 @@ public final class GuiPainter {
             gg.drawImage(tinted, 0, 0, devSize, devSize, null);
             gg.dispose();
         }
-        CACHE.put(key, out);
+        NODE_CACHE.put(key, out);
         return out;
     }
 

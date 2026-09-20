@@ -67,7 +67,14 @@ public class EditorCanvas extends JComponent {
     private float gridOffsetY;
     private boolean showGrid = true;
     private boolean snap = true;
-    private boolean showNames = true;
+    /** Подписи у всех узлов сразу — по умолчанию нет, только курсор и выделение. */
+    private boolean showNames;
+    /** Узел под курсором: его подпись видно всегда. */
+    private String hovered;
+    /** Сколько подписей выделения показывать, прежде чем они превратятся в кашу. */
+    private static final int MAX_SELECTION_LABELS = 12;
+    /** Подписи рисуются постоянным размером на экране, чтобы не мылились от зума. */
+    private static final float LABEL_DEVICE_SCALE = 2f;
     private boolean showLinks = true;
     // HIDDEN-связи в игре не рисуются вовсе, но в редакторе их надо видеть —
     // как в веб-редакторе, тонкой линией, чтобы не забивали карту
@@ -104,6 +111,11 @@ public class EditorCanvas extends JComponent {
             @Override public void mouseReleased(MouseEvent e) { onRelease(e); }
 
             @Override public void mouseMoved(MouseEvent e) { onMove(e); }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                if (hovered != null) { hovered = null; repaint(); }
+            }
 
             @Override public void mouseWheelMoved(MouseWheelEvent e) { onWheel(e); }
 
@@ -441,13 +453,45 @@ public class EditorCanvas extends JComponent {
                 g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
                         aa == null ? java.awt.RenderingHints.VALUE_ANTIALIAS_OFF : aa);
             }
-            if (showNames && zoom >= 0.6f) {
-                String name = q.displayNameOrID();
-                float ty = y + CELL + 3;
-                int w = McFont.get().width(name);
-                p.rect(x + CELL / 2f - w / 2f - 3, ty - 2, w + 6, McFont.FONT_HEIGHT + 4, 0xB0101418);
-                p.textCentered(name, x + CELL / 2f, ty, selected ? 0xFF7FD4F5 : 0xFFD6DEE6, false);
-            }
+        }
+        drawLabels(p);
+    }
+
+    /**
+     * Подписи узлов. Раньше они писались у всех сразу и в координатах карты —
+     * при отдалении шрифт сжимался в кашу. Теперь подпись видно только там, где
+     * она нужна (курсор, выделение), и рисуется она постоянным размером на
+     * экране, поэтому читается на любом зуме.
+     */
+    private void drawLabels(GuiPainter p) {
+        QuestTab tab = model.tab();
+        java.util.LinkedHashSet<String> show = new java.util.LinkedHashSet<>();
+        if (showNames) {
+            show.addAll(tab.quests.keySet());
+        } else if (model.selection().size() <= MAX_SELECTION_LABELS) {
+            show.addAll(model.selection());
+        }
+        if (hovered != null) show.add(hovered);
+        if (show.isEmpty()) return;
+
+        for (String id : show) {
+            Quest q = tab.quests.get(id);
+            if (q == null) continue;
+            float x = q.displayX * CELL;
+            float y = q.displayY * CELL;
+            if (x + CELL < viewLeft || x > viewRight || y + CELL < viewTop || y > viewBottom) continue;
+
+            boolean selected = model.selection().contains(id);
+            String name = q.displayNameOrID();
+            int w = McFont.get().width(name);
+
+            p.push();
+            // компенсируем зум: внутри этой матрицы пиксель шрифта = пиксель экрана
+            p.translate(x + CELL / 2f, y + CELL * q.iconSize.scale / 2f + 6f / zoom);
+            p.scale(LABEL_DEVICE_SCALE / zoom);
+            p.rect(-w / 2f - 3, -1, w + 6, McFont.FONT_HEIGHT + 4, 0xC8101418);
+            p.textCentered(name, 0, 1, selected ? 0xFF7FD4F5 : 0xFFE2E8EF, false);
+            p.pop();
         }
     }
 
@@ -470,6 +514,10 @@ public class EditorCanvas extends JComponent {
         String id = questAt(lastWorldX, lastWorldY);
         setToolTipText(id == null ? null : tooltipFor(id));
         setCursor(Cursor.getPredefinedCursor(id == null ? Cursor.DEFAULT_CURSOR : Cursor.HAND_CURSOR));
+        if (!java.util.Objects.equals(id, hovered)) {
+            hovered = id;
+            repaint();
+        }
     }
 
     private String tooltipFor(String id) {

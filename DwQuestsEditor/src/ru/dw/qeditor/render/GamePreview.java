@@ -73,6 +73,11 @@ public class GamePreview {
     /** Готовый фон карты: пересобирается только при смене вкладки, размера или сдвига. */
     private BufferedImage backgroundCache;
     private String backgroundKey;
+    /** Рамка окна мода: зависит только от размера, но рисуется дорого. */
+    private BufferedImage frameCache;
+    private String frameKey;
+    /** Сдвиг прокрутки левой колонки, учитываемый при проверке наведения. */
+    private float hoverOffsetY;
 
     private final Map<String, Float> hoverScale = new HashMap<>();
     /** Экранные прямоугольники узлов последнего кадра — для попадания мышью. */
@@ -256,8 +261,9 @@ public class GamePreview {
         long r0 = profile ? System.nanoTime() : 0;
         long r1 = r0, r2 = r0, r3 = r0;
         try {
-            p.rectOpaque(0, 0, screenW, screenH, 0xFF0D0D12);
-            p.guiBackground(guiLeft, guiTop, guiWidth, guiHeight);
+            // рамка окна закрывает почти весь экран, заливать его целиком незачем
+            fillAround(p, guiLeft, guiTop, guiWidth, guiHeight, 0xFF0D0D12);
+            drawWindowFrame(p);
             if (profile) r1 = System.nanoTime();
             drawBrowser(p);
             if (profile) r2 = System.nanoTime();
@@ -274,6 +280,33 @@ public class GamePreview {
             System.out.printf("кадр: рамка %d мс, карта %d мс, колонка %d мс, панель %d мс%n",
                     (r1 - r0) / 1000000, (r2 - r1) / 1000000, (r3 - r2) / 1000000, (r4 - r3) / 1000000);
         }
+    }
+
+    /** Закрасить только поля вокруг окна мода. */
+    private void fillAround(GuiPainter p, int x, int y, int w, int h, int color) {
+        if (y > 0) p.rectOpaque(0, 0, screenW, y, color);
+        if (y + h < screenH) p.rectOpaque(0, y + h, screenW, screenH - y - h, color);
+        if (x > 0) p.rectOpaque(0, y, x, h, color);
+        if (x + w < screenW) p.rectOpaque(x + w, y, screenW - x - w, h, color);
+    }
+
+    /** Рамка окна мода из кэша: её содержимое меняется только вместе с размером. */
+    private void drawWindowFrame(GuiPainter p) {
+        int devW = Math.max(1, Math.round(guiWidth * guiScale));
+        int devH = Math.max(1, Math.round(guiHeight * guiScale));
+        String key = devW + "x" + devH;
+        if (frameCache == null || !key.equals(frameKey)) {
+            BufferedImage img = new BufferedImage(devW, devH, BufferedImage.TYPE_INT_RGB);
+            GuiPainter fp = GuiPainter.forImage(img, guiScale);
+            try {
+                fp.guiBackground(0, 0, guiWidth, guiHeight);
+            } finally {
+                fp.dispose();
+            }
+            frameCache = img;
+            frameKey = key;
+        }
+        p.image(frameCache, guiLeft, guiTop, guiWidth, guiHeight);
     }
 
     private void drawBrowser(GuiPainter p) {
@@ -334,7 +367,8 @@ public class GamePreview {
                 + "|" + Math.round(uv[2] * 8) + "," + Math.round(uv[3] * 8);
         if (backgroundCache != null && key.equals(backgroundKey)) return backgroundCache;
 
-        BufferedImage img = new BufferedImage(devW, devH, BufferedImage.TYPE_INT_ARGB);
+        // фон карты непрозрачен целиком: копия дешевле смешивания
+        BufferedImage img = new BufferedImage(devW, devH, BufferedImage.TYPE_INT_RGB);
         GuiPainter bp = GuiPainter.forImage(img, guiScale);
         try {
             BufferedImage bgTex = ModAssets.get().tabBackground(tab == null ? null : tab.tabID);
@@ -519,6 +553,10 @@ public class GamePreview {
 
         p.push();
         p.clip(tabX, tabY, tabW + 14, tabH);
+        // в моде колонка — виджет со своей прокруткой: едет всё содержимое
+        // разом, а не только кнопки, иначе заголовки наезжают на список
+        p.translate(0, -tabListScroll);
+        hoverOffsetY = tabListScroll;
 
         int buttonsBackY = 180;
         p.rect(tabX, tabY, tabW, buttonsBackY, 570425344);
@@ -557,8 +595,6 @@ public class GamePreview {
         button(p, tabX + 10f, tabY + 150f, tabW - 20, 20, "Забрать все награды", "minecraft:hopper", true, false);
 
         // список вкладок: выбранная сдвинута вправо, как в моде
-        p.push();
-        p.translate(0, -tabListScroll);
         for (int i = 0; i < allTabs.size(); i++) {
             QuestTab t = allTabs.get(i);
             boolean selected = t == tab;
@@ -567,9 +603,9 @@ public class GamePreview {
             button(p, tabX + 10f + (selected ? 10f : 0f), y, tabW - 8, 20,
                     t.tabID == null ? "?" : t.tabID, t.iconItem, true, true);
         }
-        p.pop();
 
         p.pop();
+        hoverOffsetY = 0;
 
         p.lineShadow(tabX, tabY, tabW, 5, 0);
         p.lineShadow(tabX, tabY, 5 + (contentHeight > tabH ? 3 : 0), tabH, -90);
@@ -621,7 +657,8 @@ public class GamePreview {
     /** UIButton (+ вертикальные штрихи справа у кнопок вкладок). */
     private void button(GuiPainter p, float x, float y, int width, int height,
                         String text, String iconItem, boolean shadow, boolean tabStyle) {
-        boolean hovered = mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
+        float my = mouseY + hoverOffsetY;
+        boolean hovered = mouseX >= x && mouseX < x + width && my >= y && my < y + height;
         float hoverAlpha = hovered ? 1f : 0f;
 
         if (shadow) p.gradient(x + 2f, y + height, width - 4, 3, -872415232, 0, 0);
@@ -1155,15 +1192,17 @@ public class GamePreview {
     public void onWheel(float vx, float vy, int rotation) {
         mouseX = vx;
         mouseY = vy;
-        if (openQuestID != null) {
-            int maxScroll = Math.max(0, panelContentHeight - panelH());
-            panelScroll = Math.max(0, Math.min(maxScroll, panelScroll + rotation * SCROLL_STEP));
-            return;
-        }
+        // колонка вкладок — отдельный виджет со своей прокруткой, поэтому
+        // наведение на неё важнее открытой панели квеста
         if (overTabColumn(vx, vy)) {
             int contentHeight = Math.max(210 + Math.max(1, allTabs.size()) * 30, tabH);
             float maxScroll = Math.max(0, contentHeight - tabH);
             tabListScroll = Math.max(0, Math.min(maxScroll, tabListScroll + rotation * 30));
+            return;
+        }
+        if (openQuestID != null) {
+            int maxScroll = Math.max(0, panelContentHeight - panelH());
+            panelScroll = Math.max(0, Math.min(maxScroll, panelScroll + rotation * SCROLL_STEP));
             return;
         }
         if (vx < bx || vx >= bx + bw || vy < by || vy >= by + bh) return;

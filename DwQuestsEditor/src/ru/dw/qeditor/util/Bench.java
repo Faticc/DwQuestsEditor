@@ -25,7 +25,8 @@ public final class Bench {
         }
         File tab = new File(args[0]);
         int frames = args.length > 1 ? Integer.parseInt(args[1]) : 12;
-        int width = 1600, height = 1000;
+        int width = args.length > 2 ? Integer.parseInt(args[2]) : 1600;
+        int height = args.length > 3 ? Integer.parseInt(args[3]) : 1000;
 
         Theme.install();
         final MainFrame[] holder = new MainFrame[1];
@@ -38,8 +39,11 @@ public final class Bench {
         });
         MainFrame frame = holder[0];
         SwingUtilities.invokeAndWait(() -> frame.openFileForProbe(tab));
+        SwingUtilities.invokeAndWait(() -> frame.setChromeForProbe(false));
         Thread.sleep(800);
 
+        boolean fast = Boolean.getBoolean("dwq.fast");
+        if (fast) SwingUtilities.invokeAndWait(() -> frame.setFastModeForProbe(true));
         for (int page = 0; page <= 1; page++) {
             final int index = page;
             SwingUtilities.invokeAndWait(() -> frame.selectTabForProbe(index));

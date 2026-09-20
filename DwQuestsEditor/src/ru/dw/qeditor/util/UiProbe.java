@@ -44,6 +44,12 @@ public final class UiProbe {
         if (tabFile != null) SwingUtilities.invokeAndWait(() -> frame.openFileForProbe(new File(tabFile)));
         SwingUtilities.invokeAndWait(() -> frame.selectTabForProbe(tabIndex));
         if (chromeless) SwingUtilities.invokeAndWait(() -> frame.setChromeForProbe(false));
+        // шестым аргументом "scroll" — прокрутить список вкладок в просмотре
+        if (args.length > 6 && "scroll".equals(args[6])) {
+            SwingUtilities.invokeAndWait(() -> {
+                for (int i = 0; i < 5; i++) frame.scrollPreviewTabsForProbe();
+            });
+        }
 
         // дать таймерам, раскладке и первому кадру отработать
         Thread.sleep(1200);
