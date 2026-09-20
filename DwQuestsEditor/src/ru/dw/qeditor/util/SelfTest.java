@@ -1,0 +1,86 @@
+package ru.dw.qeditor.util;
+
+import ru.dw.qeditor.assets.Config;
+import ru.dw.qeditor.assets.McFont;
+import ru.dw.qeditor.assets.ModAssets;
+import ru.dw.qeditor.assets.ItemRegistry;
+import ru.dw.qeditor.model.QuestTab;
+
+import java.util.List;
+
+/** Проверка окружения: пути, иконки, шрифт, ресурсы мода. Печатает отчёт. */
+public final class SelfTest {
+
+    public static String run() {
+        StringBuilder sb = new StringBuilder();
+        Config c = Config.get();
+        sb.append("Файл настроек: ").append(c.propertiesFile().getAbsolutePath()).append('\n');
+        sb.append("icon_exporter: ").append(path(c.iconsDir)).append('\n');
+        sb.append("DwQuests jar:  ").append(path(c.dwQuestsJar)).append('\n');
+        sb.append("DwCore jar:    ").append(path(c.dwCoreJar)).append('\n');
+        sb.append("client.jar:    ").append(path(c.mcClientJar)).append('\n');
+        sb.append('\n');
+
+        ItemRegistry reg = ItemRegistry.get();
+        if (reg.loadError() != null) sb.append("ОШИБКА items.json: ").append(reg.loadError()).append('\n');
+        else sb.append("Предметов в items.json: ").append(reg.size())
+                .append(", модов: ").append(reg.mods().size()).append('\n');
+
+        String[] probes = {
+                "minecraft:dirt", "minecraft:dirt:2", "minecraft:stone",
+                "BuildCraft|Transport:pipeLens:18", "IC2:itemArmorQuantumHelmet",
+                "DwQuests:Gift", "ThermalExpansion:Machine:8", "minecraft:bedrock"
+        };
+        int ok = 0;
+        for (String p : probes) {
+            String icon = reg.iconPath(p);
+            if (icon != null) ok++;
+            sb.append("  ").append(p).append(" -> ")
+              .append(icon == null ? "ИКОНКА НЕ НАЙДЕНА" : icon)
+              .append("  [").append(reg.displayName(p)).append("]\n");
+        }
+        sb.append("Проверка иконок: ").append(ok).append('/').append(probes.length).append('\n');
+        sb.append('\n');
+
+        ModAssets assets = ModAssets.get();
+        for (String p : assets.problems()) sb.append("ВНИМАНИЕ: ").append(p).append('\n');
+        sb.append("Фон Default: ").append(assets.defaultBackground() != null ? "есть" : "нет").append('\n');
+        sb.append("Текстура звёзд: ").append(assets.stars() != null ? "есть" : "нет").append('\n');
+        sb.append("Ноды: ").append(assets.nodes() != null ? "есть" : "нет").append('\n');
+        List<String> tabs = assets.knownTabBackgrounds();
+        sb.append("Фоны вкладок в моде (").append(tabs.size()).append("): ").append(String.join(", ", tabs)).append('\n');
+        sb.append('\n');
+
+        McFont font = McFont.get();
+        if (!font.isReady()) sb.append("ОШИБКА шрифта: ").append(font.error()).append('\n');
+        else {
+            sb.append("Шрифт Minecraft загружен. Ширины: ")
+              .append("'A'=").append(font.charWidth('A'))
+              .append(", ' '=").append(font.charWidth(' '))
+              .append(", 'Я'=").append(font.charWidth('Я'))
+              .append(", 'i'=").append(font.charWidth('i')).append('\n');
+            sb.append("Ширина строки \"Привет, мир!\" = ").append(font.width("Привет, мир!")).append(" px\n");
+        }
+        return sb.toString();
+    }
+
+    private static String path(String p) {
+        if (Config.isBlank(p)) return "(не задан)";
+        java.io.File f = new java.io.File(p);
+        return p + (f.exists() ? "  [ок]" : "  [НЕ НАЙДЕН]");
+    }
+
+    public static void main(String[] args) {
+        System.out.println(run());
+        if (args.length > 0) {
+            try {
+                String json = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(args[0])),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                QuestTab tab = QuestTab.parse(json);
+                System.out.println("Вкладка '" + tab.tabID + "': квестов " + tab.quests.size());
+            } catch (Exception e) {
+                System.out.println("Не удалось прочитать вкладку: " + e);
+            }
+        }
+    }
+}

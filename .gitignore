@@ -1,0 +1,17 @@
+# Сборка
+DwQuestsEditor/out/
+DwQuestsEditor/*.jar
+DwQuestsEditor/sources.txt
+
+# Локальные настройки и черновики редактора
+dwquests-editor.properties
+autosave.json
+
+# Распакованные jar-ы мода: чужой код и ассеты, держим только локально
+work/
+
+# Прочее
+*.log
+*.png
+.idea/
+*.iml
