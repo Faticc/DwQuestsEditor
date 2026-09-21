@@ -98,6 +98,8 @@ public final class App {
 
     /** Когда последний раз сверяли файл на диске и делали автокопию. */
     private double lastWatch;
+    /** Метка файла, про которую уже спросили: окно не должно плодиться каждые 1,5 с. */
+    private long askedStamp;
     private double lastAutosave;
     /** Открытое меню строки меню: −1 — закрыто. */
     private int openMenu = -1;
@@ -321,15 +323,13 @@ public final class App {
         bx += 134;
         ui.textIn("зум " + Math.round(map.getZoom() * 100) + "%", bx, by, 90, bh,
                 Theme.TEXT_DISABLED, Ui.LEFT, Theme.FONT_SMALL, false);
-
-        return by - y + bh + 8;
         bx += 94;
 
         if (GameLink.get().connected()) by = drawProgressButtons(x, w, bx, by, bh);
+
+        return by - y + bh + 8;
     }
 
-    private float drawPreviewToolbar(float x, float y, float w) {
-        float bh = Theme.ROW;
     /**
      * Прогресс своего игрока в запущенной игре — рядом с зумом, чтобы выполнить
      * или забрать выделенное, не уходя в меню. С Shift «Выполнить» ещё и
@@ -367,6 +367,8 @@ public final class App {
         return by;
     }
 
+    private float drawPreviewToolbar(float x, float y, float w) {
+        float bh = Theme.ROW;
         float bx = x;
         ui.textIn("прогресс", bx, y, 60, bh, Theme.TEXT_MUTED, Ui.LEFT, Theme.FONT_SMALL, false);
         bx += 62;
@@ -560,8 +562,6 @@ public final class App {
             item(items, actions, "В игре: выгрузить вкладки в файлы", null, () -> game.export("tabs", null));
             item(items, actions, "Забрать выгруженные вкладки в папку", null, game::pullTabs);
             separator(items, actions);
-        }
-        check(items, actions, "Дорисовывать иконки из игры",
             String me = GameLink.get().player();
             disabled(items, actions, "Прогресс игрока " + (me.isEmpty() ? "(не в мире)" : me) + ":");
             item(items, actions, "Выполнить активные квесты (шаг вперёд)", null, () -> game.completeActive(false));
@@ -574,6 +574,8 @@ public final class App {
             item(items, actions, "Сбросить весь прогресс…", null, game::clearAll);
             item(items, actions, "Своя команда /dwq…", null, game::customCommand);
             separator(items, actions);
+        }
+        check(items, actions, "Дорисовывать иконки из игры",
                 Config.get().linkAutoIcons, game::toggleAutoIcons);
     }
 
@@ -658,6 +660,10 @@ public final class App {
         long stamp = f.lastModified();
         if (stamp == model.fileStamp()) return;
         if (model.isDirty()) {
+            // пока окно открыто, метка файла так и отличается от модели — без этой
+            // проверки каждый опрос открывал бы ещё одно окно поверх
+            if (stamp == askedStamp) return;
+            askedStamp = stamp;
             open(Dialogs.confirm("Файл изменён",
                     "Файл изменён снаружи, но в редакторе есть несохранённые правки.\n"
                             + "Перечитать файл и потерять их?",
@@ -1425,12 +1431,6 @@ public final class App {
         @Override public void requestPaste(float x, float y) { pasteQuests(x, y); }
 
         @Override public void requestDelete() { deleteSelected(); }
-    }
-
-    /** Модель поменялась — заголовок и просмотр должны это заметить. */
-    private void onModelChanged(String what) {
-        updateTitle();
-        if ("tab".equals(what) && page == 1) feedPreviewTabs();
 
         @Override
         public void questInGame(String questID, MapView.GameAction action) {
@@ -1441,6 +1441,12 @@ public final class App {
                 case CLEAR -> game.clearQuest(questID);
             }
         }
+    }
+
+    /** Модель поменялась — заголовок и просмотр должны это заметить. */
+    private void onModelChanged(String what) {
+        updateTitle();
+        if ("tab".equals(what) && page == 1) feedPreviewTabs();
         // страница JSON показывает модель, а не свою копию: любая правка —
         // хоть из полей справа, хоть сменой вкладки — требует перечитать текст
         json.reset();

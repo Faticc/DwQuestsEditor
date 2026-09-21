@@ -41,7 +41,7 @@ public final class AssistantUiCheck {
             // 1. правка выделенного квеста
             ask(app, probe, view, "Поставь выделенному квесту displayName «Живая проверка».");
             System.out.println(get(view, AssistantView.class, "status"));
-            call(view, "applyPending");
+            call(view, "applyPending"); // при «применять сразу» уже применено — повтор ничего не делает
             Quest q = model.tab().quests.get(target);
             ok &= report("правка применилась в модель", q != null && "Живая проверка".equals(q.displayName),
                     q == null ? "нет квеста" : q.displayName);
@@ -52,7 +52,7 @@ public final class AssistantUiCheck {
             model.clearSelection();
             ask(app, probe, view, "А теперь поменяй тому же квесту rarity на LEGENDARY.");
             System.out.println(get(view, AssistantView.class, "status"));
-            call(view, "applyPending");
+            call(view, "applyPending"); // при «применять сразу» уже применено — повтор ничего не делает
             q = model.tab().quests.get(target);
             ok &= report("продолжение разговора понимает «тому же квесту»",
                     q != null && q.rarity.name().equals("LEGENDARY"), q == null ? "нет" : q.rarity.name());

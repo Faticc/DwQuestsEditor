@@ -46,6 +46,12 @@ public final class TabWorkspace {
     private final File dir;
     /** Какой файл какому квесту выдан при последней раскладке. */
     private final Map<String, String> fileOf = new LinkedHashMap<>();
+    /**
+     * Файлы квестов, у которых «questID» был и в самом квесте: такое пишет
+     * часть вкладок. Сборка должна его оставить, а не принять за служебное
+     * поле раскладки — иначе все такие квесты выглядят изменёнными.
+     */
+    private final Set<String> ownIdField = new HashSet<>();
 
     public TabWorkspace(File dir) { this.dir = dir; }
 
@@ -79,8 +85,7 @@ public final class TabWorkspace {
             String name = fileOf.get(q.questID);
             JsonObject o = new JsonObject();
             o.put(ID_FIELD, q.questID);
-            JsonObject body = q.toJson();
-            for (String k : body.keys()) o.put(k, body.get(k));
+            JsonObject body = q.toJson();            for (String k : body.keys()) o.put(k, body.get(k));
             put(new File(qd, name), JsonWriter.write(o, true));
         }
         // остатки прошлых раскладок (удалённые квесты, прежние ответы модели)
@@ -99,8 +104,13 @@ public final class TabWorkspace {
      */
     public Set<String> plan(QuestTab tab) {
         fileOf.clear();
+        ownIdField.clear();
         Set<String> taken = new HashSet<>();
-        for (Quest q : tab.quests.values()) fileOf.put(q.questID, fileName(q.questID, taken));
+        for (Quest q : tab.quests.values()) {
+            String name = fileName(q.questID, taken);
+            fileOf.put(q.questID, name);
+            if (q.extra.has(ID_FIELD)) ownIdField.add(name);
+        }
         return taken;
     }
 
@@ -205,7 +215,7 @@ public final class TabWorkspace {
                     String n = f.getName();
                     id = n.substring(0, n.length() - 5);
                 }
-                o.remove(ID_FIELD);
+                if (!ownIdField.contains(f.getName())) o.remove(ID_FIELD);
                 if (quests.has(id)) errors.add(QUESTS_DIR + "/" + f.getName() + ": id «" + id + "» уже занят другим файлом");
                 quests.put(id, o);
             } catch (RuntimeException e) {

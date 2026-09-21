@@ -58,6 +58,14 @@ public final class AssistantView {
     private boolean withShot;
     /** Продолжать разговор: модель помнит прошлые просьбы, а начало берётся из кэша. */
     private boolean continueChat = true;
+    /**
+     * Применять ответ сразу. Откатить его легко (Ctrl+Z, версии), а
+     * неприменённый ответ легко не заметить: квесты «пропадают», хотя
+     * помощник написал, что сделал.
+     */
+    private boolean autoApply = true;
+    /** К какой вкладке относится ответ — чтобы не применить его к другой. */
+    private File pendingFor;
 
     /** Текущий разговор: id сеанса CLI, его каталог и число сообщений. */
     private String session;
@@ -134,6 +142,12 @@ public final class AssistantView {
                     + "Но каждое сообщение тянет за собой всю историю:\n"
                     + "для новой темы жми «Новый разговор».");
         bx += ui.checkboxWidth(chatLabel) + 16;
+        String applyLabel = "применять сразу";
+        if (ui.checkbox(bx, cy + 3, applyLabel, autoApply)) autoApply = !autoApply;
+        if (ui.over(bx, cy, ui.checkboxWidth(applyLabel), bh))
+            ui.tooltip("Ответ сразу попадает во вкладку; вернуть — Ctrl+Z.\n"
+                    + "Без галки сначала смотришь «Изменения» и жмёшь «Применить».");
+        bx += ui.checkboxWidth(applyLabel) + 16;
         if (ui.button(bx, cy, 130, bh, "Новый разговор", Ui.GHOST, !busy && session != null)) newChat();
         bx += 134;
         if (ui.button(bx, cy, 70, bh, "Папка", Ui.GHOST, workspace != null)) openFolder();
@@ -338,6 +352,7 @@ public final class AssistantView {
             return;
         }
         base = model.tab().copy();
+        pendingFor = dir;
         configure();
         boolean resume = resumes(dir);
         if (!resume) {
@@ -440,6 +455,10 @@ public final class AssistantView {
         pending = changed ? back.tab : null;
         page = 2;
         status = (changed ? "Готово — нажми «Применить». " : "Готово, вкладка не изменилась. ") + usage;
+        if (changed && autoApply) {
+            applyPending();
+            if (pending == null) status = "Готово и применено (Ctrl+Z — отменить). " + usage;
+        }
     }
 
     /**
@@ -449,6 +468,10 @@ public final class AssistantView {
      */
     private void applyPending() {
         if (pending == null) return;
+        if (!workspaceDir().equals(pendingFor)) {
+            status = "Ответ относится к вкладке «" + pendingFor.getName() + "» — открой её, чтобы применить";
+            return;
+        }
         QuestTab done = pending;
         QuestTab from = base;
         Backups.saveIfChanged(model.file(), model.tab().toJsonString(),
