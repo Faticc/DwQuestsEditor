@@ -1,7 +1,5 @@
 package ru.dw.qeditor.ai;
 
-import ru.dw.qeditor.json.JsonObject;
-import ru.dw.qeditor.json.JsonWriter;
 import ru.dw.qeditor.model.Defs;
 import ru.dw.qeditor.model.Parent;
 import ru.dw.qeditor.model.Quest;
@@ -14,257 +12,147 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Сборка запроса для Claude: правила формата вкладки DwQuests + нужный кусок
- * вкладки + пожелание пользователя.
+ * Что говорится помощнику.
  *
- * <p>Раньше сюда уходила вся открытая вкладка, а обратно требовался её полный
- * JSON. На «Испытаниях» это мегабайт в одну сторону и мегабайт в другую —
- * деньги за токены при правке одного квеста. Теперь отправляется только то,
- * что относится к делу ({@link Scope}), а ответ — патч: изменившиеся квесты и
- * ничего больше.
+ * <p>Два куска. Системный промпт — формат вкладки и как работать с файлами:
+ * он одинаков у всех запросов, поэтому со второго запроса читается из кэша
+ * почти даром. Сообщение — короткое: задача, что выделено и в каких это
+ * файлах. Сами квесты в запрос не вставляются — модель читает нужные файлы
+ * сама (см. {@link TabWorkspace}).
  */
 public final class QuestPrompt {
 
     private QuestPrompt() { }
 
-    /** Что из вкладки попадает в запрос. */
-    public enum Scope {
-        SELECTED("Выделенные квесты"),
-        OUTLINE("Карта без описаний"),
-        ALL("Вся вкладка"),
-        NONE("Ничего (новая вкладка)");
-
-        public final String ru;
-
-        Scope(String ru) { this.ru = ru; }
-    }
-
-    public static String rules() {
+    public static String system() {
         StringBuilder sb = new StringBuilder();
-        sb.append("Ты помогаешь редактировать вкладку квестов мода DwQuests для Minecraft 1.7.10.\n");
-        sb.append("Формат вкладки (JSON):\n");
+        sb.append("Ты помощник в редакторе вкладок квестов мода DwQuests (Minecraft 1.7.10).\n");
+        sb.append("Пользователь пишет по-русски; отвечай по-русски и коротко.\n\n");
+
+        sb.append("# Рабочий каталог\n");
+        sb.append("В текущем каталоге — открытая в редакторе вкладка, разложенная по файлам:\n");
+        sb.append("  tab.json          поля самой вкладки (tabID, iconItem, sortIndex…), без квестов\n");
+        sb.append("  quests/*.json     по квесту на файл; id квеста — в поле \"questID\"\n");
+        sb.append("  map.txt           по строке на квест: id (x,y) «название» <- родители [задач, наград] -> файл\n");
+        sb.append("  tab.png           снимок вкладки, как в игре (есть, только если о нём сказано)\n");
+        sb.append("Полный путь каталога — в сообщении пользователя. Read, Edit и Write принимают\n");
+        sb.append("только абсолютные пути; Grep и Glob вызывай всегда с path (map.txt или quests).\n");
+        sb.append("Файлы собраны из текущего состояния редактора перед каждым сообщением.\n\n");
+
+        sb.append("# Как работать\n");
+        sb.append("- Читай только то, что нужно для задачи. Квест по id или названию ищи Grep-ом по\n");
+        sb.append("  map.txt или quests/, а не читай всё подряд — вкладка может быть на тысячу квестов.\n");
+        sb.append("- Меняй файлы Edit-ом, точечной заменой. Write — только для новых файлов.\n");
+        sb.append("- Новый квест: Write в quests/<id>.json, внутри обязательно \"questID\".\n");
+        sb.append("- Удалить квест: Write в его файл одного слова null (удалять файлы нечем).\n");
+        sb.append("- Переименовать квест: поменяй \"questID\" в его файле и ссылки в parents у\n");
+        sb.append("  зависимых квестов (найди их Grep-ом по старому id).\n");
+        sb.append("- map.txt и tab.png редактор обратно не читает — их не правь.\n");
+        sb.append("- Изменения не применяются сразу: редактор соберёт файлы, покажет пользователю\n");
+        sb.append("  разницу, и тот сам нажмёт «Применить». Поэтому не спрашивай подтверждения —\n");
+        sb.append("  делай. Если задача неясна — сделай разумное и скажи, что предположил.\n");
+        sb.append("- В конце ответь одной-тремя фразами: что сделал. JSON в ответ не пиши.\n\n");
+
+        sb.append("# Файл квеста\n");
         sb.append("{\n");
-        sb.append("  \"tabID\": \"имя вкладки\",            // совпадает с именем фона в jar мода\n");
-        sb.append("  \"iconItem\": \"minecraft:book\",\n");
-        sb.append("  \"sortIndex\": 0,\n");
-        sb.append("  \"quests\": {\n");
-        sb.append("    \"ИдКвеста\": {\n");
-        sb.append("      \"displayX\": 0, \"displayY\": 0,   // клетки, в игре умножаются на 24\n");
-        sb.append("      \"displayName\": \"Название\",\n");
-        sb.append("      \"description\": \"<BR>Текст\",     // <BR> — абзац, <RI> — отступ, §-коды цвета\n");
-        sb.append("      \"iconItem\": \"mod:item:meta\",\n");
-        sb.append("      \"rarity\": \"UNCOMMON\",\n");
-        sb.append("      \"iconSize\": \"DEFAULT\",\n");
-        sb.append("      \"nodeType\": \"NORMAL\",\n");
-        sb.append("      \"tasksType\": \"DEFAULT\",\n");
-        sb.append("      \"parents\": [\"ДругойКвест\"],     // либо {\"questID\":..,\"parentType\":..,\"lineType\":..}\n");
-        sb.append("      \"tasks\": { \"0\": { \"type\": \"ITEM_DETECT\", \"requiredCount\": 16,\n");
-        sb.append("                          \"forgeName\": \"minecraft:log\" } },\n");
-        sb.append("      \"rewards\": [\"minecraft:diamond=3\", \"command:give @p minecraft:apple 1\"]\n");
-        sb.append("    }\n");
-        sb.append("  }\n");
-        sb.append("}\n\n");
+        sb.append("  \"questID\": \"Начало\",\n");
+        sb.append("  \"displayX\": 0, \"displayY\": 0,          // клетки; в игре ×24\n");
+        sb.append("  \"displayName\": \"Первые шаги\",\n");
+        sb.append("  \"description\": \"<BR>Текст\",             // <BR> — абзац, <RI> — отступ, §-коды цвета\n");
+        sb.append("  \"iconItem\": \"minecraft:book\",           // mod:name[:meta]\n");
+        sb.append("  \"rarity\": \"RARE\",                        // по умолчанию UNCOMMON — тогда поля нет\n");
+        sb.append("  \"parents\": [\"ДругойКвест\"],             // либо {\"questID\":…,\"parentType\":…,\"lineType\":…}\n");
+        sb.append("  \"tasks\": {\"0\": {\"type\": \"ITEM_DETECT\", \"requiredCount\": 16, \"forgeName\": \"minecraft:log\"}},\n");
+        sb.append("  \"rewards\": [\"minecraft:diamond=3\", \"command:give @p minecraft:apple 1\"]\n");
+        sb.append("}\n");
+        sb.append("Комментарии // здесь только для пояснения — в файлах их быть не должно, это чистый JSON.\n");
+        sb.append("Поля iconSize, nodeType, tasksType, broadcast пишутся, только когда не по умолчанию.\n");
+        sb.append("Незнакомые поля в файле сохраняй как есть.\n\n");
 
-        sb.append("Значения перечислений:\n");
-        sb.append("  rarity:    ").append(names(Defs.Rarity.values())).append('\n');
-        sb.append("  iconSize:  ").append(names(Defs.IconSize.values())).append('\n');
-        sb.append("  nodeType:  ").append(names(Defs.NodeType.values())).append('\n');
-        sb.append("  tasksType: ").append(names(Defs.TasksType.values()))
-                .append("   (ONE_OF — достаточно одной задачи, ORDER — по порядку)\n");
+        sb.append("# Значения\n");
+        sb.append("  rarity:     ").append(names(Defs.Rarity.values())).append('\n');
+        sb.append("  iconSize:   ").append(names(Defs.IconSize.values())).append('\n');
+        sb.append("  nodeType:   ").append(names(Defs.NodeType.values())).append('\n');
+        sb.append("  tasksType:  ").append(names(Defs.TasksType.values()))
+                .append("  (ONE_OF — хватит одной задачи, ORDER — по порядку)\n");
         sb.append("  parentType: ").append(names(Defs.ParentType.values()))
-                .append("   lineType: ").append(names(Defs.LineType.values())).append('\n');
+                .append("; lineType: ").append(names(Defs.LineType.values())).append('\n');
         sb.append("  type задачи: ").append(taskTypes()).append('\n');
-        sb.append("    Звёздочкой отмечены типы, которые сервер реально отслеживает; остальные\n");
-        sb.append("    в игре не засчитаются сами — предлагай их только если пользователь просит.\n\n");
+        sb.append("    * — сервер засчитывает сам; остальные предлагай, только если просят.\n\n");
 
-        sb.append("Правила:\n");
-        sb.append("  • Задачи с предметом требуют forgeName и requiredCount > 0.\n");
-        sb.append("  • ENTITY_KILL требует className (класс моба) и requiredCount.\n");
-        sb.append("  • TASK_CONFIRM и PLAY_TIME не используют forgeName; у PLAY_TIME requiredCount — часы.\n");
-        sb.append("  • Ключи в tasks — строки с числами, порядок важен.\n");
-        sb.append("  • parents ссылаются на существующие квесты этой же вкладки; циклы запрещены.\n");
-        sb.append("  • Строка предмета: mod:name[:meta][=количество][{NBT}]. Неизвестный мод id\n");
-        sb.append("    в игре превращается в бедрок, поэтому id не выдумывай.\n");
-        sb.append("  • Награда-команда начинается с \"command:\".\n");
-        sb.append("  • Координаты не должны совпадать у двух квестов, иначе узлы наложатся.\n\n");
+        sb.append("# Правила\n");
+        sb.append("- Задачи с предметом: forgeName и requiredCount > 0. ENTITY_KILL: className и requiredCount.\n");
+        sb.append("  TASK_CONFIRM и PLAY_TIME без forgeName; у PLAY_TIME requiredCount — часы.\n");
+        sb.append("- Ключи tasks — строки с числами, порядок важен.\n");
+        sb.append("- parents ссылаются на квесты этой же вкладки; циклы запрещены.\n");
+        sb.append("- Предмет: mod:name[:meta][=количество][{NBT}]. Незнакомый id в игре станет бедроком —\n");
+        sb.append("  не выдумывай id, бери те, что уже встречаются во вкладке, или ванильные.\n");
+        sb.append("- Награда-команда начинается с \"command:\".\n");
+        sb.append("- Два квеста не должны стоять в одной клетке. Занятые клетки — в map.txt.\n");
         return sb.toString();
     }
 
     /**
-     * Полный запрос.
-     *
-     * @param selection выделенные квесты — они и их соседи попадают в запрос
-     *                  при {@link Scope#SELECTED}
+     * Сообщение пользователя: вкладка одной строкой, выделенное с файлами,
+     * соседи по ветке — только id. Этого хватает, чтобы модель сразу открыла
+     * нужные файлы, не разыскивая их.
      */
-    public static String build(QuestTab tab, Scope scope, Collection<String> selection, String request) {
-        return build(tab, scope, selection, request, null);
-    }
-
-    /**
-     * @param shotName имя файла со снимком вкладки в рабочем каталоге либо
-     *                 null; со снимком видно расположение узлов и иконки —
-     *                 словами это описывать дороже, чем показать
-     */
-    public static String build(QuestTab tab, Scope scope, Collection<String> selection,
-                               String request, String shotName) {
-        StringBuilder sb = new StringBuilder(rules());
-        sb.append(context(tab, scope, selection));
-        if (shotName != null) {
-            sb.append("В текущем каталоге лежит «").append(shotName)
-                    .append("» — снимок вкладки в том виде, в каком её видят в игре.\n")
-                    .append("Открой его инструментом Read, прежде чем отвечать: на нём видно\n")
-                    .append("расположение узлов, их иконки, цвета редкости и связи.\n\n");
-        }
-        sb.append("Задача: ").append(request).append("\n\n");
-        sb.append(answerFormat(scope, shotName != null));
-        return sb.toString();
-    }
-
-    /** Кусок вкладки, который уходит в запрос. */
-    public static String context(QuestTab tab, Scope scope, Collection<String> selection) {
-        if (scope == Scope.NONE) return "";
-
+    public static String message(QuestTab tab, TabWorkspace ws, Collection<String> selection,
+                                 String request, boolean withShot) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Вкладка: tabID=").append(tab.tabID)
-                .append(", iconItem=").append(tab.iconItem)
-                .append(", sortIndex=").append(tab.sortIndex)
-                .append(", квестов ").append(tab.quests.size()).append(".\n\n");
+        if (ws != null) sb.append("Каталог: ").append(abs(ws.dir())).append('\n');
+        sb.append("Вкладка «").append(tab.tabID).append("», квестов ").append(tab.quests.size()).append(".\n");
 
-        if (scope == Scope.ALL) {
-            sb.append("Вкладка целиком:\n```json\n").append(tab.toJsonString()).append("\n```\n\n");
-            return sb.toString();
-        }
-        if (scope == Scope.OUTLINE) {
-            sb.append("Карта вкладки (id, координаты, название, зависимости):\n");
-            for (Quest q : tab.quests.values()) sb.append("  ").append(outline(q)).append('\n');
-            sb.append('\n');
-            return sb.toString();
-        }
-
-        // SELECTED: сами квесты целиком, соседи — для понимания ветки,
-        // остальные — одной строкой, чтобы модель не заняла чужую клетку
         Set<String> picked = new LinkedHashSet<>();
         for (String id : selection) if (tab.quests.containsKey(id)) picked.add(id);
         if (picked.isEmpty()) {
-            sb.append("Квесты не выделены — работай по карте вкладки.\n\n");
-            sb.append("Карта вкладки (id, координаты, название, зависимости):\n");
-            for (Quest q : tab.quests.values()) sb.append("  ").append(outline(q)).append('\n');
-            sb.append('\n');
-            return sb.toString();
+            sb.append("В редакторе ничего не выделено.\n");
+        } else {
+            sb.append("Выделено в редакторе (о них, скорее всего, и речь):\n");
+            int n = 0;
+            for (String id : picked) {
+                if (++n > 40) {
+                    sb.append("  …и ещё ").append(picked.size() - 40).append('\n');
+                    break;
+                }
+                sb.append("  ").append(id).append(" — ").append(path(ws, id)).append('\n');
+            }
+            List<String> near = neighbours(tab, picked);
+            if (!near.isEmpty()) {
+                sb.append("Связаны с ними: ").append(String.join(", ", near.subList(0, Math.min(30, near.size()))));
+                if (near.size() > 30) sb.append(" …");
+                sb.append('\n');
+            }
         }
+        if (withShot) sb.append("Снимок вкладки — tab.png; посмотри его, если важно расположение.\n");
+        sb.append("\nЗадача: ").append(request.trim()).append('\n');
+        return sb.toString();
+    }
 
-        Set<String> neighbours = new LinkedHashSet<>();
+    private static String path(TabWorkspace ws, String id) {
+        String p = ws == null ? null : ws.pathOf(id);
+        if (p == null) p = "quests/" + id + ".json";
+        return ws == null ? p : abs(ws.dir()) + "/" + p;
+    }
+
+    /** Путь с прямыми косыми: так модель не путается с экранированием «\\». */
+    private static String abs(java.io.File f) {
+        return f.getAbsolutePath().replace('\\', '/');
+    }
+
+    private static List<String> neighbours(QuestTab tab, Set<String> picked) {
+        Set<String> out = new LinkedHashSet<>();
         for (String id : picked) {
-            Quest q = tab.quests.get(id);
-            for (Parent p : q.parents) if (p.questID != null && !picked.contains(p.questID)) neighbours.add(p.questID);
+            for (Parent p : tab.quests.get(id).parents)
+                if (p.questID != null && !picked.contains(p.questID)) out.add(p.questID);
         }
         for (Quest q : tab.quests.values()) {
+            if (picked.contains(q.questID)) continue;
             for (Parent p : q.parents)
-                if (p.questID != null && picked.contains(p.questID) && !picked.contains(q.questID))
-                    neighbours.add(q.questID);
+                if (p.questID != null && picked.contains(p.questID)) out.add(q.questID);
         }
-        neighbours.removeIf(id -> !tab.quests.containsKey(id));
-
-        sb.append("Выделенные квесты (их и надо править):\n```json\n");
-        sb.append(JsonWriter.write(subset(tab, picked), true)).append("\n```\n\n");
-
-        if (!neighbours.isEmpty()) {
-            sb.append("Соседние квесты (для понимания ветки, менять их не просили):\n");
-            for (String id : neighbours) sb.append("  ").append(outline(tab.quests.get(id))).append('\n');
-            sb.append('\n');
-        }
-
-        // Остальные нужны лишь затем, чтобы не занять чужую клетку и не
-        // придумать существующий id. На вкладке в тысячу квестов их полный
-        // список — тридцать килобайт, поэтому берутся только ближние
-        List<String> rest = new ArrayList<>();
-        int far = 0;
-        for (Quest q : tab.quests.values()) {
-            if (picked.contains(q.questID) || neighbours.contains(q.questID)) continue;
-            if (rest.size() < NEAR_LIMIT && near(tab, picked, q))
-                rest.add(q.questID + " (" + fmt(q.displayX) + "," + fmt(q.displayY) + ")");
-            else far++;
-        }
-        if (!rest.isEmpty()) {
-            sb.append("Соседи по карте — id и занятые клетки (не занимай их):\n  ");
-            sb.append(String.join("; ", rest)).append('\n');
-        }
-        if (far > 0)
-            sb.append("Ещё ").append(far).append(" квестов вкладки лежат дальше — они не мешают.\n");
-        sb.append('\n');
-        return sb.toString();
-    }
-
-    /** Сколько клеток вокруг выделенного считается «рядом». */
-    private static final float NEAR_CELLS = 12f;
-    /** И сколько таких соседей максимум попадёт в запрос. */
-    private static final int NEAR_LIMIT = 80;
-
-    private static boolean near(QuestTab tab, Set<String> picked, Quest other) {
-        for (String id : picked) {
-            Quest q = tab.quests.get(id);
-            if (q == null) continue;
-            if (Math.abs(q.displayX - other.displayX) <= NEAR_CELLS
-                    && Math.abs(q.displayY - other.displayY) <= NEAR_CELLS) return true;
-        }
-        return false;
-    }
-
-    private static String answerFormat(Scope scope, boolean withShot) {
-        String tools = withShot
-                ? "Из инструментов используй только Read для снимка; файлов не создавай."
-                : "Не используй инструменты и не создавай файлы.";
-        if (scope == Scope.NONE) {
-            return "Ответь ТОЛЬКО итоговым JSON новой вкладки целиком, без пояснений и без "
-                    + "```-обрамления. " + tools;
-        }
-        return "Ответь ТОЛЬКО JSON-патчем — тем, что меняется, и ничем больше:\n"
-                + "{\"quests\": {\"НовыйИлиИзменённый\": { …квест целиком… }, \"Лишний\": null}}\n"
-                + "Правила патча: объекты сливаются рекурсивно, null удаляет ключ, массивы\n"
-                + "(parents, rewards) заменяются целиком, изменённый квест приводи полностью.\n"
-                + "Не повторяй неизменившиеся квесты — это только лишние токены.\n"
-                + "Без пояснений и без ```-обрамления. " + tools;
-    }
-
-    /** Одна строка про квест: id, клетка, название, зависимости. */
-    private static String outline(Quest q) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(q.questID).append(" (").append(fmt(q.displayX)).append(',')
-                .append(fmt(q.displayY)).append(')');
-        if (q.displayName != null && !q.displayName.isEmpty())
-            sb.append(" «").append(strip(q.displayName)).append('»');
-        if (!q.parents.isEmpty()) {
-            sb.append(" ← ");
-            List<String> ids = new ArrayList<>();
-            for (Parent p : q.parents) if (p.questID != null) ids.add(p.questID);
-            sb.append(String.join(", ", ids));
-        }
-        sb.append(" [задач ").append(q.tasks.size()).append(", наград ").append(q.rewards.size()).append(']');
-        return sb.toString();
-    }
-
-    private static JsonObject subset(QuestTab tab, Set<String> ids) {
-        JsonObject quests = new JsonObject();
-        for (String id : ids) {
-            Quest q = tab.quests.get(id);
-            if (q != null) quests.put(id, q.toJson());
-        }
-        JsonObject out = new JsonObject();
-        out.put("quests", quests);
-        return out;
-    }
-
-    /** Запрос без текущей вкладки — создать новую с нуля. */
-    public static String buildNew(String request) {
-        return build(QuestTab.empty("NewTab"), Scope.NONE, List.of(), request);
-    }
-
-    private static String strip(String s) {
-        return s.replaceAll("§.", "");
-    }
-
-    private static String fmt(float f) {
-        return f == Math.rint(f) ? String.valueOf((long) f) : String.valueOf(f);
+        out.removeIf(id -> !tab.quests.containsKey(id));
+        return new ArrayList<>(out);
     }
 
     private static String names(Enum<?>[] values) {

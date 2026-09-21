@@ -16,7 +16,7 @@ import java.io.File;
  */
 public final class SettingsDialog extends Dialog {
 
-    private static final String[] MODELS = {"sonnet", "opus", "haiku"};
+    private static final String[] MODELS = {"sonnet", "opus", "fable", "haiku"};
 
     private final Runnable onSaved;
 
