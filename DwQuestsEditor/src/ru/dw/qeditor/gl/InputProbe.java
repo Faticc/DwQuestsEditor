@@ -23,6 +23,11 @@ public final class InputProbe {
 
     public static void scroll(Input in, float dy) { in.onScroll(0, dy); }
 
+    /** Клавиша; mods — как у GLFW (с зажатым Shift это GLFW_MOD_SHIFT и т. п.). */
+    public static void key(Input in, int key, boolean down, int mods) {
+        in.onKey(key, 0, down ? GLFW_PRESS : GLFW_RELEASE, mods);
+    }
+
     /** Конец кадра: события прожиты, нажатия-отпускания сброшены. */
     public static void endFrame(Input in) { in.endFrame(); }
 }

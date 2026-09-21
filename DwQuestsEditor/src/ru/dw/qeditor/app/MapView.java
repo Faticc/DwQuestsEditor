@@ -21,6 +21,9 @@ import java.util.Objects;
 
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_DELETE;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_DOWN;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_BRACKET;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_BRACKET;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_UP;
@@ -112,6 +115,18 @@ public final class MapView {
     private float rubberX, rubberY, rubberW, rubberH;
     private String dragBeforeJson;
     private final Map<String, float[]> dragOrigin = new HashMap<>();
+
+    /** Поворот группы за ручку над рамкой выделения. */
+    private GroupRotate rotation;
+    /** Угол от центра до точки нажатия — от него отсчитывается поворот. */
+    private double rotStartAngle;
+    private double rotDegrees;
+
+    /** Ручка поворота висит над рамкой на столько точек экрана. */
+    private static final float HANDLE_GAP = 22f;
+    private static final float HANDLE_R = 6f;
+    /** С Shift угол прилипает к этому шагу. */
+    private static final float ROTATE_SNAP = 15f;
 
     /** Что делает каждый пункт открытого контекстного меню. */
     private final Object menuId = new Object();
@@ -295,13 +310,15 @@ public final class MapView {
         drawPendingLink(p);
         p.pop();
 
+        drawRotateGizmo(ui, x, y);
+
         if (rubber && (rubberW > 2 || rubberH > 2)) {
             ui.rect(x + rubberX, y + rubberY, rubberW, rubberH, 0x3C3D7EB8);
             ui.border(x + rubberX, y + rubberY, rubberW, rubberH, 0xFF7AC3F5);
         }
         ui.popClip();
 
-        if (hovered != null && !dragNodes && !panning && !rubber && linkFrom == null)
+        if (hovered != null && !dragNodes && !panning && !rubber && linkFrom == null && rotation == null)
             ui.tooltip(tooltipFor(hovered));
     }
 
@@ -496,6 +513,26 @@ public final class MapView {
             }
             return;
         }
+        if (rotation != null) {
+            if (ui.keyPressed(GLFW_KEY_ESCAPE)) {
+                // отмена: фигура встаёт как была, в историю ничего не пишется
+                rotation.apply(model.tab(), 0);
+                rotation = null;
+                model.commitDrag(dragBeforeJson, "Поворот квестов");
+                dragBeforeJson = null;
+                return;
+            }
+            // на кадре отпускания угол не пересчитывается: Shift, отпущенный
+            // чуть раньше кнопки, иначе сбросил бы привязку к 15°
+            if (in.leftDown()) rotateTo(lx, ly, in.shift());
+            else {
+                rotation = null;
+                if (dragBeforeJson != null) model.commitDrag(dragBeforeJson, "Поворот квестов");
+                dragBeforeJson = null;
+            }
+            ui.cursor(GlWindow.CURSOR_MOVE);
+            return;
+        }
         if (rubber) {
             rubberX = Math.min(pressX, lx);
             rubberY = Math.min(pressY, ly);
@@ -545,7 +582,11 @@ public final class MapView {
             return;
         }
 
-        String hit = hot ? questAt(wx, wy) : null;
+        float[] handle = rotateHandle();
+        boolean overHandle = hot && handle != null
+                && sq(lx - handle[0]) + sq(ly - handle[1]) <= sq(HANDLE_R + 3);
+        String hit = hot && !overHandle ? questAt(wx, wy) : null;
+        if (overHandle) ui.cursor(GlWindow.CURSOR_HAND);
         if (hot) {
             lastWorldX = wx;
             lastWorldY = wy;
@@ -594,6 +635,10 @@ public final class MapView {
             pressWorldX = wx;
             pressWorldY = wy;
 
+            if (overHandle) {
+                startRotation(lx, ly);
+                return;
+            }
             if (in.shift() && hit != null) {
                 linkFrom = hit;
                 return;
@@ -623,6 +668,97 @@ public final class MapView {
         if (ui.keyPressed(GLFW_KEY_RIGHT)) nudge(1, 0);
         if (ui.keyPressed(GLFW_KEY_UP)) nudge(0, -1);
         if (ui.keyPressed(GLFW_KEY_DOWN)) nudge(0, 1);
+        if (ui.keyPressed(GLFW_KEY_LEFT_BRACKET)) rotateSelection(in.shift() ? -1 : -ROTATE_SNAP);
+        if (ui.keyPressed(GLFW_KEY_RIGHT_BRACKET)) rotateSelection(in.shift() ? 1 : ROTATE_SNAP);
+    }
+
+    // ------------------------------------------------------------------ поворот
+
+    private static float sq(float v) { return v * v; }
+
+    private float toLocalX(float worldPx) { return (worldPx - camX) * zoom; }
+
+    private float toLocalY(float worldPx) { return (worldPx - camY) * zoom; }
+
+    /**
+     * Рамка выделения и ручка поворота в точках поля:
+     * {ручкаX, ручкаY, левый, верхний, правый, нижний}; null — вертеть нечего.
+     */
+    private float[] rotateHandle() {
+        if (model.selection().size() < 2) return null;
+        float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+        int n = 0;
+        for (String id : model.selection()) {
+            Quest q = model.tab().quests.get(id);
+            if (q == null) continue;
+            float r = CELL * q.iconSize.scale / 2f + 5;
+            float cx = q.displayX * CELL + CELL / 2f, cy = q.displayY * CELL + CELL / 2f;
+            minX = Math.min(minX, cx - r);
+            minY = Math.min(minY, cy - r);
+            maxX = Math.max(maxX, cx + r);
+            maxY = Math.max(maxY, cy + r);
+            n++;
+        }
+        if (n < 2) return null;
+        float l = toLocalX(minX), t = toLocalY(minY), r = toLocalX(maxX), b = toLocalY(maxY);
+        // большая группа не влезает в экран — ручка прижимается к краю поля,
+        // иначе до неё не дотянуться; угол всё равно считается от точки нажатия
+        float m = HANDLE_R + 6;
+        float hx = Math.max(m, Math.min(areaW - m, (l + r) / 2f));
+        float hy = Math.max(m, Math.min(areaH - m, t - HANDLE_GAP));
+        return new float[]{hx, hy, l, t, r, b};
+    }
+
+    private void startRotation(float lx, float ly) {
+        rotation = new GroupRotate(model.tab(), model.selection());
+        if (rotation.isEmpty()) { rotation = null; return; }
+        dragBeforeJson = model.tab().toJsonString();
+        rotStartAngle = Math.atan2(ly - pivotLocalY(), lx - pivotLocalX());
+        rotDegrees = 0;
+    }
+
+    private float pivotLocalX() { return toLocalX(rotation.pivotX * CELL + CELL / 2f); }
+
+    private float pivotLocalY() { return toLocalY(rotation.pivotY * CELL + CELL / 2f); }
+
+    private void rotateTo(float lx, float ly, boolean snapAngle) {
+        double a = Math.atan2(ly - pivotLocalY(), lx - pivotLocalX());
+        double deg = Math.toDegrees(a - rotStartAngle);
+        deg = ((deg % 360) + 540) % 360 - 180;      // в пределах −180…180
+        if (snapAngle) deg = Math.round(deg / ROTATE_SNAP) * ROTATE_SNAP;
+        rotDegrees = deg;
+        if (rotation.apply(model.tab(), deg)) model.touch();
+    }
+
+    /** Поворот выделения на заданный угол одной правкой — клавиши, меню, панель. */
+    public void rotateSelection(double degrees) {
+        if (model.selection().size() < 2) return;
+        GroupRotate r = new GroupRotate(model.tab(), model.selection());
+        model.edit("Поворот квестов", () -> r.apply(model.tab(), degrees));
+    }
+
+    private void drawRotateGizmo(Ui ui, float x, float y) {
+        if (rotation != null) {
+            float px = x + pivotLocalX(), py = y + pivotLocalY();
+            ui.line(px - 6, py, px + 6, py, 1.5f, 0xFFFFD166);
+            ui.line(px, py - 6, px, py + 6, 1.5f, 0xFFFFD166);
+            float mx = ui.mx(), my = ui.my();
+            ui.line(px, py, mx, my, 1f, 0x99FFD166);
+            String label = String.format(java.util.Locale.ROOT, "%.1f°", rotDegrees);
+            float tw = ui.textWidth(label);
+            ui.roundRect(mx + 12, my + 10, tw + 10, ui.lineHeight() + 4, 3, 0xE0101418);
+            ui.text(label, mx + 17, my + 12, 0xFFFFD166);
+            return;
+        }
+        if (dragNodes || rubber) return;
+        float[] h = rotateHandle();
+        if (h == null) return;
+        ui.border(x + h[2], y + h[3], h[4] - h[2], h[5] - h[3], 0x667AC3F5);
+        ui.line(x + h[0], y + h[3], x + h[0], y + h[1] + HANDLE_R, 1f, 0x997AC3F5);
+        boolean over = sq(ui.mx() - x - h[0]) + sq(ui.my() - y - h[1]) <= sq(HANDLE_R + 3);
+        ui.roundRect(x + h[0] - HANDLE_R, y + h[1] - HANDLE_R, HANDLE_R * 2, HANDLE_R * 2, HANDLE_R,
+                over ? 0xFFFFD166 : 0xFF7AC3F5);
     }
 
     private void dragTo(float wx, float wy) {
@@ -704,6 +840,17 @@ public final class MapView {
 
         items.add(Popup.Item.of("Вставить квест здесь"));
         actions.add(() -> { if (callbacks != null) callbacks.requestPaste(cellX, cellY); });
+
+        if (model.selection().size() > 1) {
+            items.add(Popup.Item.line());
+            actions.add(null);
+            items.add(Popup.Item.of("Повернуть на 90° по часовой"));
+            actions.add(() -> rotateSelection(90));
+            items.add(Popup.Item.of("Повернуть на 90° против часовой"));
+            actions.add(() -> rotateSelection(-90));
+            items.add(Popup.Item.of("Повернуть на 180°"));
+            actions.add(() -> rotateSelection(180));
+        }
 
         if (hit != null) {
             items.add(Popup.Item.line());

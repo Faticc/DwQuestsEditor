@@ -190,7 +190,16 @@ public final class Sidebar {
             int n = model.selection().size();
             Widgets.caption(ui, n > 1 ? "Выделено квестов: " + n + " — свойства правятся по одному"
                     : "Квест не выбран", x, cy + 6);
-            return cy + 22;
+            if (n < 2) return cy + 22;
+            cy += 22;
+            label(ui, "Повернуть, °", x, cy, labelW, row);
+            rotateDegrees = ui.floatField(this + "rotateDeg", x + labelW, cy, 80, row, rotateDegrees, 1);
+            float bx = x + labelW + 88;
+            if (ui.button(bx, cy, 44, row, "↻")) rotateSelection(rotateDegrees);
+            if (ui.button(bx + 48, cy, 44, row, "↺")) rotateSelection(-rotateDegrees);
+            cy += row + 4;
+            Widgets.caption(ui, "Или тянуть ручку над рамкой (Shift — шаг 15°), клавиши [ ]", x, cy);
+            return cy + 16;
         }
 
         label(ui, "questID", x, cy, labelW, row);
@@ -254,6 +263,14 @@ public final class Sidebar {
         Widgets.caption(ui, "В игре покажется: " + q.displayNameOrID()
                 + " [0/" + q.tasksCount() + "]", x, cy);
         return cy + 16;
+    }
+
+    /** Угол для поворота группы из панели — помнится между выделениями. */
+    private float rotateDegrees = 90;
+
+    private void rotateSelection(double degrees) {
+        GroupRotate r = new GroupRotate(model.tab(), model.selection());
+        model.edit("Поворот квестов", () -> r.apply(model.tab(), degrees));
     }
 
     private void renameQuest(String oldID, String newID) {
