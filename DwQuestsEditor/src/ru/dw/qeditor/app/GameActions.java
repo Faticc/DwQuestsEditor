@@ -281,6 +281,207 @@ final class GameActions {
                 }));
     }
 
+    // ------------------------------------------------- прогресс своего игрока
+
+    /*
+     * Синтаксис команд мода взят из подсказок сервера в чате (исходников
+     * серверной части у нас нет): "/dwq complete < all | tab | active >" и
+     * "/dwq complete_quest <вкладка> <квест> False <ник>". Ник всегда свой —
+     * мост другие и не пропустит. Пробелы в именах — подчёркивания, как у
+     * "/dwq tab paste". Если сервер ответит подсказкой — она покажется в окне.
+     */
+
+    private static String arg(String name) {
+        return name.trim().replace(' ', '_');
+    }
+
+    private String me() {
+        String me = GameLink.get().player();
+        if (me.isEmpty() && GameLink.get().connect()) me = GameLink.get().player();
+        if (me.isEmpty()) throw new IllegalStateException("игрок не в мире — зайдите на сервер");
+        return me;
+    }
+
+    /** tabID открытой вкладки; null (и строка состояния), если его нет. */
+    private String currentTab() {
+        String tabID = app.model().tab().tabID;
+        if (tabID != null && !tabID.isEmpty()) return tabID;
+        app.status("У вкладки нет tabID — в игре её не найти");
+        return null;
+    }
+
+    /** Шаг вперёд: выполнить все квесты, которые сейчас активны. */
+    void completeActive(boolean reward) {
+        run(reward ? "Выполнить активные и забрать награды" : "Выполнить активные квесты",
+                () -> "/dwq complete active " + me(), reward);
+    }
+
+    void completeTab(boolean reward) {
+        String tabID = currentTab();
+        if (tabID == null) return;
+        confirmThen("Выполнить всю вкладку",
+                "Все квесты вкладки '" + tabID + "' станут выполненными у игрока " + GameLink.get().player() + ".",
+                "Выполнить", () -> run("Выполнить вкладку " + tabID,
+                        () -> "/dwq complete tab " + arg(tabID) + " " + me(), reward));
+    }
+
+    void completeAll(boolean reward) {
+        confirmThen("Выполнить все квесты",
+                "Все квесты всех вкладок станут выполненными у игрока " + GameLink.get().player() + ".",
+                "Выполнить все", () -> run("Выполнить все квесты", () -> "/dwq complete all " + me(), reward));
+    }
+
+    void completeQuest(String questID, boolean reward) {
+        String tabID = currentTab();
+        if (tabID == null) return;
+        String command = "/dwq complete_quest " + arg(tabID) + " " + arg(questID) + " False ";
+        if (!reward) {
+            run("Выполнить: " + questID, () -> command + me(), false);
+            return;
+        }
+        // по очереди: награду можно просить только когда клиент узнал о выполнении,
+        // а мост как раз полторы секунды ждёт ответа сервера
+        async("Выполнить и забрать: " + questID, () -> {
+            JsonObject r = GameLink.get().command(command + me());
+            JsonObject claimed;
+            try {
+                claimed = GameLink.get().claim(tabID, questID);
+            } catch (Exception e) {
+                claimed = new JsonObject().put("done", "награда: " + e.getMessage());
+            }
+            return merge(r, claimed);
+        });
+    }
+
+    void claimQuest(String questID) {
+        String tabID = currentTab();
+        if (tabID == null) return;
+        async("Забрать награду: " + questID, () -> GameLink.get().claim(tabID, questID));
+    }
+
+    void claimAll() {
+        async("Забрать все награды", () -> GameLink.get().claimAll());
+    }
+
+    void clearQuest(String questID) {
+        String tabID = currentTab();
+        if (tabID == null) return;
+        confirmThen("Сбросить квест",
+                "Квест '" + questID + "' снова станет невыполненным у игрока " + GameLink.get().player() + ".",
+                "Сбросить", () -> run("Сбросить: " + questID,
+                        () -> "/dwq clear_quest " + arg(tabID) + " " + arg(questID) + " " + me(), false));
+    }
+
+    void clearTab() {
+        String tabID = currentTab();
+        if (tabID == null) return;
+        confirmThen("Сбросить прогресс вкладки",
+                "Весь прогресс вкладки '" + tabID + "' у игрока " + GameLink.get().player() + " пропадёт.",
+                "Сбросить", () -> run("Сбросить вкладку " + tabID,
+                        () -> "/dwq clear tab " + arg(tabID) + " " + me(), false));
+    }
+
+    void clearAll() {
+        confirmThen("Сбросить весь прогресс",
+                "Весь прогресс квестов игрока " + GameLink.get().player() + " пропадёт — во всех вкладках.",
+                "Сбросить всё", () -> run("Сбросить весь прогресс", () -> "/dwq clear all " + me(), false));
+    }
+
+    /** Своя команда — для того, чего нет в меню; мост всё равно пропустит только /dwq complete…/clear… на себя. */
+    void customCommand() {
+        String me;
+        try {
+            me = me();
+        } catch (Exception e) {
+            app.error("Команда не отправлена", e);
+            return;
+        }
+        app.open(Dialogs.prompt("Команда прогресса",
+                "Команда (/dwq complete…, complete_quest…, complete_with_reward…, clear…, clear_quest…; последним — " + me + ")",
+                "/dwq complete_quest " + arg(currentTabOr("вкладка")) + " квест False " + me,
+                text -> run("Команда", () -> text, false)));
+    }
+
+    private String currentTabOr(String fallback) {
+        String tabID = app.model().tab().tabID;
+        return tabID == null || tabID.isEmpty() ? fallback : tabID;
+    }
+
+    private void confirmThen(String title, String text, String ok, Runnable then) {
+        app.open(Dialogs.confirm(title, text + "\n\nКоманда уйдёт от вашего имени, права проверит сервер.",
+                new String[]{ok, "Отмена"}, result -> {
+                    if (result == 0) then.run();
+                }));
+    }
+
+    /** Команда в чат игры; с reward — следом «Забрать все награды». */
+    private void run(String title, java.util.concurrent.Callable<String> command, boolean reward) {
+        async(title, () -> {
+            JsonObject r = GameLink.get().command(command.call());
+            if (!reward) return r;
+            JsonObject claimed;
+            try {
+                claimed = GameLink.get().claimAll();
+            } catch (Exception e) {
+                claimed = new JsonObject().put("done", "награды: " + e.getMessage());
+            }
+            return merge(r, claimed);
+        });
+    }
+
+    private static JsonObject merge(JsonObject a, JsonObject b) {
+        JsonArray replies = new JsonArray();
+        for (JsonObject o : new JsonObject[]{a, b}) {
+            JsonArray arr = o.arr("replies");
+            if (arr != null) for (int i = 0; i < arr.size(); i++) replies.add(arr.str(i));
+        }
+        return new JsonObject().put("done", a.str("done", "") + "\n" + b.str("done", ""))
+                .put("replies", replies);
+    }
+
+    /** Ответы, дошедшие из потока моста, — их показывает кадр. */
+    private final java.util.concurrent.ConcurrentLinkedQueue<Runnable> inbox =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    /**
+     * Мост отвечает не сразу: после действия он полторы секунды слушает чат,
+     * чтобы вернуть ответ сервера. Поэтому запрос — в своём потоке, а итог
+     * показывает кадр.
+     */
+    private void async(String title, java.util.concurrent.Callable<JsonObject> work) {
+        app.status(title + "…");
+        Thread t = new Thread(() -> {
+            Runnable result;
+            try {
+                JsonObject r = work.call();
+                result = () -> showResult(title, r);
+            } catch (Exception e) {
+                result = () -> {
+                    app.status(title + ": не вышло — " + e.getMessage());
+                    app.open(Dialogs.message(title, "Не вышло: " + e.getMessage()));
+                };
+            }
+            inbox.add(result);
+            GlWindow.postEmptyEvent();
+        }, "dwq-progress");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void showResult(String title, JsonObject r) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(r.str("done", "")).append('\n');
+        JsonArray replies = r.arr("replies");
+        if (replies == null || replies.size() == 0) {
+            sb.append("\nСервер в чат ничего не ответил.");
+        } else {
+            sb.append("\nОтвет сервера:\n");
+            for (int i = 0; i < replies.size(); i++) sb.append("  ").append(replies.str(i)).append('\n');
+        }
+        app.status(title + " — готово" + (replies == null || replies.size() == 0 ? "" : ": " + replies.str(0)));
+        app.showText(title, sb.toString().trim());
+    }
+
     // -------------------------------------------------------------- выгрузка
 
     void export(final String what, final String scope) {
@@ -322,6 +523,7 @@ final class GameActions {
 
     /** Раз в кадр из App.tick. */
     void tick() {
+        for (Runnable done; (done = inbox.poll()) != null; ) done.run();
         Runnable r = afterJob;
         if (r == null) return;
         afterJob = null;

@@ -12,6 +12,7 @@ import ru.dw.qbridge.client.ClientTicker;
 import ru.dw.qbridge.export.IconRenderer;
 import ru.dw.qbridge.export.Names;
 import ru.dw.qbridge.export.Stacks;
+import ru.dw.qbridge.quests.QuestProgress;
 import ru.dw.qbridge.quests.Quests;
 import ru.dw.qbridge.quests.TabJson;
 import ru.dw.qbridge.quests.TabBatchUpload;
@@ -77,6 +78,28 @@ final class Api {
             paste(ex, query, body);
         } else if (path.equals("/paste-all")) {
             pasteAll(ex, body);
+        } else if (path.equals("/command")) {
+            final String text = body;
+            progressAction(ex, new Callable<String>() {
+                public String call() { return QuestProgress.command(text); }
+            });
+        } else if (path.equals("/claim")) {
+            final String tab = query.get("tab"), quest = query.get("quest");
+            if (tab == null || quest == null) throw new IllegalArgumentException("нужны параметры tab и quest");
+            progressAction(ex, new Callable<String>() {
+                public String call() { return QuestProgress.claim(tab, quest); }
+            });
+        } else if (path.equals("/claim-all")) {
+            progressAction(ex, new Callable<String>() {
+                public String call() { return QuestProgress.claimAll(); }
+            });
+        } else if (path.equals("/progress")) {
+            requireQuests();
+            final String tab = query.get("tab");
+            if (tab == null || tab.isEmpty()) throw new IllegalArgumentException("нужен параметр tab");
+            json(ex, ClientTicker.get().call(new Callable<String>() {
+                public String call() { return QuestProgress.progress(tab); }
+            }, TIMEOUT_MS));
         } else {
             BridgeServer.send(ex, 404, "application/json; charset=utf-8",
                     "{\"error\":\"нет такого запроса\"}".getBytes("UTF-8"));
@@ -304,6 +327,27 @@ final class Api {
             }
         }, TIMEOUT_MS);
         json(ex, "{\"ok\":true,\"started\":\"paste\",\"tabs\":" + tabs.size() + "}");
+    }
+
+    /** Сколько слушать чат после действия: сервер отвечает за тик-другой, но бывает и занят. */
+    private static final long REPLY_MS = 1500L;
+
+    /**
+     * Действие с прогрессом своего игрока ({@link QuestProgress}): выполнить в
+     * главном потоке, подождать ответа сервера и вернуть, что он написал в чат, —
+     * иначе редактор не узнает ни про нехватку прав, ни про опечатку в команде.
+     */
+    private void progressAction(HttpExchange ex, Callable<String> action) throws Exception {
+        requireQuests();
+        String done = ClientTicker.get().call(action, TIMEOUT_MS);
+        Thread.sleep(REPLY_MS);
+        List<String> replies = QuestProgress.takeReplies();
+        StringBuilder sb = new StringBuilder("{\"ok\":true,\"done\":").append(quote(done)).append(",\"replies\":[");
+        for (int i = 0; i < replies.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(quote(replies.get(i)));
+        }
+        json(ex, sb.append("]}").toString());
     }
 
     // ------------------------------------------------------------------- мелочи

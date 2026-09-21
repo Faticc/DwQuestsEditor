@@ -328,6 +328,51 @@ public final class GameLink {
         return post("/export", query, "");
     }
 
+    // ------------------------------------------------- прогресс своего игрока
+
+    /**
+     * Команда {@code /dwq complete…} / {@code /dwq clear…} из чата игры. Мост
+     * пропускает только их и только на ник своего игрока, а в ответе отдаёт,
+     * что сервер написал в чат ({@code replies}).
+     */
+    public JsonObject command(String text) throws IOException {
+        return JsonParser.parseObject(post0("/command", null, text));
+    }
+
+    /** Кнопка книги квестов «Забрать награду». */
+    public JsonObject claim(String tabID, String questID) throws IOException {
+        return JsonParser.parseObject(post0("/claim", "tab=" + enc(tabID) + "&quest=" + enc(questID), ""));
+    }
+
+    /** Кнопка книги квестов «Забрать все награды». */
+    public JsonObject claimAll() throws IOException {
+        return JsonParser.parseObject(post0("/claim-all", null, ""));
+    }
+
+    /** Состояние квестов вкладки у своего игрока: completed / rewarded / active. */
+    public JsonObject progress(String tabID) throws IOException {
+        try {
+            return JsonParser.parseObject(get("/progress", "tab=" + enc(tabID)));
+        } catch (IOException e) {
+            throw older(e);
+        }
+    }
+
+    /** Запросы прогресса появились в мосте позже прочих — у старого на них 404. */
+    private String post0(String path, String query, String body) throws IOException {
+        try {
+            return post(path, query, body);
+        } catch (IOException e) {
+            throw older(e);
+        }
+    }
+
+    private static IOException older(IOException e) {
+        if (!"нет такого запроса".equals(e.getMessage())) return e;
+        return new IOException("мост в игре старой версии и этого не умеет — соберите DwQuestsBridge "
+                + "(build.bat, install.bat) и перезапустите игру");
+    }
+
     public JsonObject jobStatus() throws IOException {
         return JsonParser.parseObject(get("/status", null));
     }

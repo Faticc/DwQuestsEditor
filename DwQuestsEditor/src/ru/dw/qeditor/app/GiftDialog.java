@@ -268,7 +268,7 @@ public final class GiftDialog extends Dialog {
                     } else {
                         openDialog.accept(ItemPicker.open(
                                 current == null ? "minecraft:diamond" : current,
-                                s -> slots[slotIndex] = s));
+                                s -> setSlot(slotIndex, s)));
                     }
                 }
             }
@@ -327,8 +327,53 @@ public final class GiftDialog extends Dialog {
         if (slotIndex >= 0 && slots[slotIndex] != null) {
             ForgeName fn = ForgeName.parse(slots[slotIndex]);
             int count = Math.max(1, (fn.hasCount ? fn.count : 1) - dir);
-            slots[slotIndex] = fn.withCount(count);
+            setSlot(slotIndex, fn.withCount(count));
         }
+    }
+
+    /** Стопка в игре — 64; больше в один слот гифта не кладём. */
+    private static final int MAX_STACK = 64;
+
+    /**
+     * Положить предмет в слот, а всё, что сверх 64, — в следующие стопки: сперва
+     * добрать неполные стопки того же предмета, потом в свободные слоты. Так
+     * колесо на полной стопке растит вторую, а не упирается в 64.
+     */
+    private void setSlot(int index, String item) {
+        if (item == null) {
+            slots[index] = null;
+            return;
+        }
+        ForgeName fn = ForgeName.parse(item);
+        int count = fn.hasCount ? fn.count : 1;
+        if (count <= MAX_STACK || fn.isCommand()) {
+            slots[index] = item;
+            return;
+        }
+        slots[index] = fn.withCount(MAX_STACK);
+        int rest = count - MAX_STACK;
+        // неполные стопки того же предмета (id и NBT совпадают)
+        for (int k = 1; k < slots.length && rest > 0; k++) {
+            int i = (index + k) % slots.length;
+            if (slots[i] == null) continue;
+            ForgeName other = ForgeName.parse(slots[i]);
+            if (!other.id.equals(fn.id) || !java.util.Objects.equals(other.nbt, fn.nbt)) continue;
+            int have = other.hasCount ? other.count : 1;
+            int add = Math.min(rest, MAX_STACK - have);
+            if (add <= 0) continue;
+            slots[i] = other.withCount(have + add);
+            rest -= add;
+        }
+        // свободные слоты — после этого, по кругу
+        for (int k = 1; k < slots.length && rest > 0; k++) {
+            int i = (index + k) % slots.length;
+            if (slots[i] != null) continue;
+            int put = Math.min(rest, MAX_STACK);
+            slots[i] = fn.withCount(put);
+            rest -= put;
+        }
+        // гифт полон — остаток не выбрасываем, он остаётся в исходной стопке
+        if (rest > 0) slots[index] = fn.withCount(MAX_STACK + rest);
     }
 
     private void setTexture(Defs.GiftTexture t) {

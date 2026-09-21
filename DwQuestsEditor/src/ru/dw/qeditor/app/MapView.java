@@ -65,7 +65,12 @@ public final class MapView {
         void requestPaste(float x, float y);
 
         void requestDelete();
+
+        /** Действие с квестом у своего игрока в запущенной игре (через мост). */
+        default void questInGame(String questID, GameAction action) { }
     }
+
+    public enum GameAction { COMPLETE, COMPLETE_AND_CLAIM, CLAIM, CLEAR }
 
     private final EditorModel model;
     private Callbacks callbacks;
@@ -858,6 +863,15 @@ public final class MapView {
             items.add(Popup.Item.of("Открыть в просмотре"));
             actions.add(() -> { if (callbacks != null) callbacks.questDoubleClicked(hit); });
 
+            if (ru.dw.qeditor.link.GameLink.get().connected()) {
+                items.add(Popup.Item.line());
+                actions.add(null);
+                gameItem(items, actions, "В игре: выполнить", hit, GameAction.COMPLETE);
+                gameItem(items, actions, "В игре: выполнить и забрать награду", hit, GameAction.COMPLETE_AND_CLAIM);
+                gameItem(items, actions, "В игре: забрать награду", hit, GameAction.CLAIM);
+                gameItem(items, actions, "В игре: сбросить…", hit, GameAction.CLEAR);
+            }
+
             Quest q = model.tab().quests.get(hit);
             if (q != null && !q.parents.isEmpty()) {
                 items.add(Popup.Item.line());
@@ -872,6 +886,12 @@ public final class MapView {
 
         menuActions = actions;
         popup.open(menuId, ui.screenMx(), ui.screenMy(), items, 220);
+    }
+
+    private void gameItem(List<Popup.Item> items, List<Runnable> actions, String label,
+                          String questID, GameAction action) {
+        items.add(Popup.Item.of(label));
+        actions.add(() -> { if (callbacks != null) callbacks.questInGame(questID, action); });
     }
 
     private void takeMenuPick(Popup popup) {

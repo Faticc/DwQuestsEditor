@@ -522,6 +522,17 @@ public final class App {
             separator(items, actions);
         }
         check(items, actions, "Дорисовывать иконки из игры",
+            String me = GameLink.get().player();
+            disabled(items, actions, "Прогресс игрока " + (me.isEmpty() ? "(не в мире)" : me) + ":");
+            item(items, actions, "Выполнить активные квесты (шаг вперёд)", null, () -> game.completeActive(false));
+            item(items, actions, "Выполнить активные и забрать награды", null, () -> game.completeActive(true));
+            item(items, actions, "Выполнить всю эту вкладку…", null, () -> game.completeTab(false));
+            item(items, actions, "Выполнить все квесты…", null, () -> game.completeAll(false));
+            item(items, actions, "Забрать все награды", null, game::claimAll);
+            item(items, actions, "Сбросить прогресс этой вкладки…", null, game::clearTab);
+            item(items, actions, "Сбросить весь прогресс…", null, game::clearAll);
+            item(items, actions, "Своя команда /dwq…", null, game::customCommand);
+            separator(items, actions);
                 Config.get().linkAutoIcons, game::toggleAutoIcons);
     }
 
@@ -1379,6 +1390,16 @@ public final class App {
     private void onModelChanged(String what) {
         updateTitle();
         if ("tab".equals(what) && page == 1) feedPreviewTabs();
+
+        @Override
+        public void questInGame(String questID, MapView.GameAction action) {
+            switch (action) {
+                case COMPLETE -> game.completeQuest(questID, false);
+                case COMPLETE_AND_CLAIM -> game.completeQuest(questID, true);
+                case CLAIM -> game.claimQuest(questID);
+                case CLEAR -> game.clearQuest(questID);
+            }
+        }
         // страница JSON показывает модель, а не свою копию: любая правка —
         // хоть из полей справа, хоть сменой вкладки — требует перечитать текст
         json.reset();
