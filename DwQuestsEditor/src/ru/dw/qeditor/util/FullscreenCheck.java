@@ -1,70 +1,71 @@
 package ru.dw.qeditor.util;
 
-import ru.dw.qeditor.ui.MainFrame;
-import ru.dw.qeditor.ui.theme.Theme;
+import ru.dw.qeditor.app.App;
 
-import javax.swing.SwingUtilities;
-import java.awt.Rectangle;
+import java.awt.image.BufferedImage;
 import java.io.File;
 
 /**
- * Проверка полноэкранного режима: туда и обратно, с возвратом прежних размеров.
+ * Проверка полноэкранного режима: туда и обратно, с возвратом прежнего вида.
+ *
+ * <p>Пересоздавать окно, как это делал Swing, больше не нужно: GLFW переводит
+ * окно на монитор одним вызовом. Проверять остаётся то же самое — что обвязка
+ * (меню, колонки, строка состояния) уходит и возвращается, а тело окна после
+ * возврата совпадает с исходным.
  *
  * <p>Запускается с {@code -Ddwq.nofullscreen=true}, чтобы не перехватывать
- * настоящий экран — проверяется сама механика: окно пересоздаётся без рамки,
- * панели прячутся и возвращаются, размеры восстанавливаются.
+ * настоящий экран: тогда проверяется только раскладка.
  *
- * <p>Запуск: {@code java -Ddwq.nofullscreen=true -cp out ru.dw.qeditor.util.FullscreenCheck вкладка.json}
+ * <p>Запуск: {@code java -Ddwq.nofullscreen=true -cp "out;lib/*"
+ * ru.dw.qeditor.util.FullscreenCheck [вкладка.json]}
  */
 public final class FullscreenCheck {
 
     private FullscreenCheck() { }
 
-    public static void main(String[] args) throws Exception {
-        Theme.install();
+    public static void main(String[] args) {
         int width = 1400, height = 900;
+        boolean ok;
 
-        final MainFrame[] holder = new MainFrame[1];
-        SwingUtilities.invokeAndWait(() -> {
-            MainFrame f = new MainFrame();
-            f.setSize(width, height);
-            f.setLocation(-6000, -6000);
-            f.setVisible(true);
-            holder[0] = f;
-        });
-        MainFrame frame = holder[0];
-        if (args.length > 0) {
-            SwingUtilities.invokeAndWait(() -> frame.openFileForProbe(new File(args[0])));
+        try (GlProbe probe = GlProbe.open(width, height)) {
+            App app = new App(probe.window(), probe.batch());
+            if (args.length > 0) app.openFile(new File(args[0]));
+
+            BufferedImage before = probe.frameSelf(app::drawFrame);
+            app.toggleFullscreen();
+            BufferedImage inside = probe.frameSelf(app::drawFrame);
+            app.toggleFullscreen();
+            BufferedImage after = probe.frameSelf(app::drawFrame);
+            height = before.getHeight();
+
+            // полоса строки меню: в полном экране её быть не должно
+            boolean menuChanged = !sameStrip(before, inside, 0, 26);
+            boolean menuBack = sameStrip(before, after, 0, 26);
+            // строка состояния внизу — та же история. Сравнивать её с исходной
+            // нельзя: сам переход пишет туда «Обычный режим», — поэтому
+            // проверяем, что она отличается от полноэкранного кадра
+            boolean statusChanged = !sameStrip(before, inside, height - 24, height);
+            boolean statusBack = !sameStrip(inside, after, height - 24, height);
+            // тело окна (колонки и страница) должно вернуться точно как было
+            boolean bodyBack = sameStrip(before, after, 30, height - 30);
+
+            report("в режиме строка меню исчезла", menuChanged);
+            report("в режиме строка состояния исчезла", statusChanged);
+            report("после выхода строка меню вернулась", menuBack);
+            report("после выхода строка состояния вернулась", statusBack);
+            report("после выхода колонки и страница на месте", bodyBack);
+
+            ok = menuChanged && statusChanged && menuBack && statusBack && bodyBack;
+            System.out.println(ok ? "ПРОВЕРКА ПРОЙДЕНА" : "ПРОВЕРКА НЕ ПРОЙДЕНА");
         }
-        Thread.sleep(600);
-
-        Rectangle before = frame.getBounds();
-        boolean menuBefore = frame.getJMenuBar() != null;
-
-        SwingUtilities.invokeAndWait(frame::toggleFullscreen);
-        Thread.sleep(500);
-        boolean undecorated = frame.isUndecorated();
-        boolean menuHidden = frame.getJMenuBar() == null;
-
-        SwingUtilities.invokeAndWait(frame::toggleFullscreen);
-        Thread.sleep(500);
-        Rectangle after = frame.getBounds();
-        boolean decorated = !frame.isUndecorated();
-        boolean menuBack = frame.getJMenuBar() != null;
-        boolean sizeBack = after.width == before.width && after.height == before.height;
-
-        report("меню было видно", menuBefore);
-        report("в режиме окно без рамки", undecorated);
-        report("в режиме меню спрятано", menuHidden);
-        report("после выхода рамка вернулась", decorated);
-        report("после выхода меню вернулось", menuBack);
-        report("после выхода размер прежний", sizeBack);
-
-        boolean ok = menuBefore && undecorated && menuHidden && decorated && menuBack && sizeBack;
-        System.out.println(ok ? "ПРОВЕРКА ПРОЙДЕНА" : "ПРОВЕРКА НЕ ПРОЙДЕНА");
-
-        SwingUtilities.invokeAndWait(frame::dispose);
         System.exit(ok ? 0 : 1);
+    }
+
+    private static boolean sameStrip(BufferedImage a, BufferedImage b, int y0, int y1) {
+        for (int y = Math.max(0, y0); y < Math.min(a.getHeight(), y1); y += 2)
+            for (int x = 0; x < a.getWidth(); x += 4)
+                if (a.getRGB(x, y) != b.getRGB(x, y)) return false;
+        return true;
     }
 
     private static void report(String what, boolean ok) {

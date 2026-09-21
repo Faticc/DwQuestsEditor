@@ -1,25 +1,47 @@
 # DwQuests Editor — памятка для Claude
 
-Редактор вкладок квестов мода **DwQuests** (Minecraft 1.7.10) на Java/Swing, без внешних
-зависимостей. Проект: `DwQuestsEditor/`, подробности и история — в [PROGRESS.md](PROGRESS.md).
+Редактор вкладок квестов мода **DwQuests** (Minecraft 1.7.10) на Java + LWJGL: окно,
+интерфейс и карта — GLFW и OpenGL 3.3, свой тулкит, Swing не используется.
+Проект: `DwQuestsEditor/`, подробности и история — в [PROGRESS.md](PROGRESS.md).
 
 ## Сборка и запуск
+
+Зависимости (LWJGL 3.3.6) подтягивает обёртка Maven — сам Maven ставить не нужно:
+
+```bash
+cd "C:/Users/User/Desktop/dwquests/DwQuestsEditor" && ./mvnw -B compile
+```
+
+Быстрая пересборка во время работы — тем же ручным `javac`, jar-ы лежат в `lib/`:
 
 ```bash
 cd "C:/Users/User/Desktop/dwquests/DwQuestsEditor"
 find src -name "*.java" > sources.txt
-javac -encoding UTF-8 -d out @sources.txt
+javac -encoding UTF-8 -cp "lib/*" -d out @sources.txt
 ```
 
 Всегда с `-encoding UTF-8` / `-Dfile.encoding=UTF-8`: иначе ломается кириллица в исходниках
-и в выводе. Окно — `ru.dw.qeditor.ui.MainFrame`, есть `build.bat` / `run.bat` / `dwq.bat`.
+и в выводе. Точка входа — `ru.dw.qeditor.Main`, запуск с `-cp "out;lib/*"`; есть
+`build.bat` / `run.bat` / `dwq.bat`.
+
+**Дистрибутив для человека — `package.bat`.** Кладёт в `dist/` два варианта, и в
+обоих все ассеты внутри: `jar/DwQuestsEditor.jar` (один файл, нужна Java 17+) и
+`DwQuestsEditor-win64.zip` (папка с exe и урезанной Java, не нужно ничего).
+Собирает `util/Distribution` (fat jar + `dwq-assets/` + `index.txt`),
+иконку рисует `util/AppIcon` тем же узлом квеста.
+
+**`.bat`-файлы держать в чистом ASCII.** cmd читает их по смещению в байтах и
+после `chcp 65001` теряет место на не-ASCII тексте — получается
+`< was unexpected at this time`. Всё русское печатают java-утилиты.
+И вызывать вложенные `.bat` только как `call "%~dp0build.bat"`: текущий каталог
+в поиске команд может быть отключён.
 
 ## Как править квесты без GUI
 
 Для этого есть консольный режим — им удобно пользоваться из терминала:
 
 ```bash
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.cli.QuestCli help
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.cli.QuestCli help
 ```
 
 Команды читают и пишут тот же JSON, что и редактор, сохраняя неизвестные поля:
@@ -47,15 +69,15 @@ java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.cli.QuestCli help
 Пример: ветка из двух квестов.
 
 ```bash
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.cli.QuestCli new Botania.json --tab Botania
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.cli.QuestCli add Botania.json Начало \
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.cli.QuestCli new Botania.json --tab Botania
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.cli.QuestCli add Botania.json Начало \
   --name "Первые шаги" --x 0 --y 0 --icon minecraft:book --rarity COMMON \
   --desc "<BR>Собери первые ресурсы."
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.cli.QuestCli task-add Botania.json Начало \
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.cli.QuestCli task-add Botania.json Начало \
   --type ITEM_DETECT --item minecraft:log --count 16
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.cli.QuestCli add Botania.json Дерево \
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.cli.QuestCli add Botania.json Дерево \
   --x 2 --y 0 --icon minecraft:log --parent Начало --reward "minecraft:diamond=3"
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.cli.QuestCli validate Botania.json
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.cli.QuestCli validate Botania.json
 ```
 
 **Перед правками делай `backup`** — или просто правь: копия всё равно останется,
@@ -81,63 +103,97 @@ java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.cli.QuestCli validate Botania.j
 * `iconSize`: DEFAULT 1.0, MEDIUM 1.5, LARGE 2.0, HUGE 2.5 — значения из мода,
   в веб-редакторе они другие и неверные.
 
+## Интерфейс
+
+Свой тулкит в режиме немедленного вывода (`gui/Ui`, `gui/Widgets`, `gui/Popup`):
+виджетов-объектов нет, каждый кадр экран описывается заново вызовами вида
+`if (ui.button(x, y, w, h, "Сохранить"))`. Что важно помнить:
+
+* Значение поля каждый кадр приходит из модели, а правка тут же уходит в модель
+  через `EditorModel.edit(...)` — «тихого обновления из модели» нет вовсе.
+* Ключ виджета обычно собирается строкой в кадре (`this + "questID"`), поэтому
+  сравнивать ключи можно **только по значению**: в следующем кадре это другой
+  объект. `Ui.focused(id)` так и делает.
+* Если значение поля меняют кодом (кнопка вставила §-код), надо сбросить
+  состояние поля: `ui.forgetState(id)` — иначе поле в фокусе покажет старый
+  текст.
+* Верхние слои (меню, диалог) рисуются последними, но ввод забирают первыми:
+  до отрисовки нижних вызывается `ui.blockInput()` / `Popup.blockIfOpen`.
+* Диалог — верхний слой того же кадра (`app/Dialog`), а не отдельное окно.
+  Системные диалоги файла и папки открывает tinyfd (`app/FileDialogs`).
+* Координаты интерфейса — логические точки: масштаб экрана учитывает
+  `Ui.scale()`, поэтому на 150 % интерфейс не мельчает. Карта и просмотр внутри
+  своих прямоугольников меняют масштаб рисователя (`GuiPainter.push/scale`) —
+  там единица уже клетка карты или пиксель GUI мода.
+
 ## Ресурсы
 
-`runtime/` в корне репозитория — иконки предметов и урезанные jar-ы с текстурами
-и шрифтом. `Config.autodetect()` берёт их в первую очередь, поэтому установленный
-клиент не обязателен. Полные jar-ы мода и распаковка `work/` в репозиторий не
-входят.
+`runtime/` в корне репозитория: `icons/` — иконки предметов и `json/items.json`,
+`game/assets/…` — текстуры мода и шрифт Minecraft, вытащенные из jar-ов. Самих
+jar-ов мода в проекте больше нет: всё нужное лежит распакованным, поэтому ни
+клиент, ни моды не нужны.
+
+Читает это `AssetPack`: папка на диске (`runtime/`) либо ресурсы внутри
+собственного jar-а (`dwq-assets/`, с `index.txt` — каталог в classpath иначе
+не перечислить). Порядок поиска в `Config.autodetect()`: пути из настроек →
+`runtime/` рядом с программой → встроенное в jar → установленный клиент.
+`Config.runtimeDir()` требует внутри `game` или `icons`: у собранного
+jpackage приложения рядом своя папка `runtime` — это встроенная Java.
+Распаковка `work/` в репозиторий не входит.
 
 ## Скорость
 
-Вкладки бывают на 400 квестов и тысячу связей. Что важно помнить при правках рендера:
+Вкладки бывают на тысячу квестов и столько же связей. Рисует видеокарта, и
+главный прежний тормоз — аддитивное свечение узлов на процессоре — исчез:
+1200 квестов и 1274 связи на 1920×1080 дают ~17 мс на кадр (59 к/с) в поле
+редактора и ~7 мс (139 к/с) в просмотре. Что важно помнить при правках рендера:
 
-* Линии рисуются пакетом `LinkRenderer.Batch`: подсказки рендеринга и обводка
-  ставятся один раз на кадр — их смена заставляет Java2D пересобирать конвейер,
-  и это была главная причина тормозов.
-* Дуга считается замкнутой формулой, хватает 24 вершин вместо 250.
-* Фон карты в просмотре кэшируется: меняется только при панораме и зуме.
-* `GuiPainter.blit` ловит случай «размер уже совпадает с экранным» и копирует
-  картинку без трансформации.
-* Узлы и связи за пределами экрана пропускаются.
-* Кэши картинок раздельные: кадров анимации нода 32 на пару «тип × цвет», иконок
-  предметов сотни — в общем кэше они вытесняли друг друга, и каждый второй кадр
-  спрайты собирались заново.
-* Спрайт нода строится не крупнее 160 точек и растягивается при выводе: свечение
-  мягкое, растяжения не видно, а пересборка кадра втрое дешевле.
-* Рамка окна и фон карты кэшируются непрозрачными картинками — копия дешевле
-  смешивания.
-* Самое дорогое, что осталось, — аддитивное свечение узлов: каждый узел это
-  блендинг ~280×280 точек на процессоре. Это и есть предел Java2D; на видеокарте
-  (как в самом моде) оно было бы бесплатным.
+* Всё идёт одним пакетом вершин (`gl/Batch`), один шейдер на все примитивы.
+  Пакет рвётся только на смене текстуры, режима смешивания и области
+  отсечения — то есть новый вызов отрисовки надо «заслужить».
+* Иконки предметов и глифы лежат в атласах, поэтому четыреста разных иконок
+  не стоят четырёхсот вызовов отрисовки.
+* Дуга связи считается замкнутой формулой, хватает 24 вершин вместо 250.
+* Узлы и связи за пределами экрана пропускаются — это по-прежнему самая
+  дешёвая оптимизация.
+* Кэшировать картинками (фон карты, рамку окна, спрайты нодов) больше не надо
+  и не нужно: на видеокарте пересборка дешевле, чем копия из памяти.
+* Градиент цвета вдоль связи выключается на мелком масштабе
+  (`LinkRenderer.gradientWorthIt`) — разницы не видно, а вершин вдвое меньше.
+* Кадры рисуются не всё время: пока ничего не происходит, окно ждёт события
+  (`GlWindow.waitEvents`). Постоянный поток кадров нужен только просмотру,
+  где идёт анимация.
 
-* Буфер поля живёт между кадрами, поэтому фон надо заливать **после** сдвига
-  камеры — иначе заливка уходит мимо буфера и остаются «призраки» прошлого кадра.
-  Это ловит `GhostCheck`.
-
-Замер: `java -cp out ru.dw.qeditor.util.Bench вкладка.json 10`,
+Замер: `java -cp "out;lib/*" ru.dw.qeditor.util.Bench вкладка.json 20 1920 1080`,
 подробности по этапам — с `-Ddwq.profile=true`.
-Проверка полной перерисовки: `java -cp out ru.dw.qeditor.util.GhostCheck вкладка.json`.
+Тестовые вкладки на 24 / 120 / 400 / 1200 квестов — в `DwQuestsEditor/testquests/`
+(пересобрать другого размера: `python testquests/make.py`).
 
 ## Проверка вида
 
-Отладочные рендеры (не открывают окон поверх игры — рисуют программно):
+Отладочные рендеры: окно GLFW создаётся скрытым, кадр рисуется в кадровый
+буфер и уходит в PNG — поверх того, что открыто на экране, ничего не всплывает.
 
 ```bash
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.SelfTest
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.PainterProbe probe.png
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.PreviewProbe .
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.UiProbe ui.png вкладка.json 0
-java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.UiProbe ui.png вкладка.json 1 1920 1080 full
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.SelfTest
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.PainterProbe probe.png
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.FontProbe font.png
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.PreviewProbe .
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.UiProbe ui.png вкладка.json 0
+java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.UiProbe ui.png вкладка.json 1 1920 1080 full
 ```
 
-Проверки механики: `FullscreenCheck` (полный экран туда-обратно, запускать с
-`-Ddwq.nofullscreen=true`, чтобы не перехватывать экран) и `GhostCheck`.
-Тем же ключом можно отключить захват экрана в самой программе, если полный
-экран где-то ведёт себя плохо.
+`UiProbe` рисует настоящее окно редактора (`App.drawFrame`), так что им сверяется
+весь интерфейс, а не только карта.
 
-`UiProbe` выносит окно за пределы экрана и печатает его в PNG — им можно сверять
-интерфейс, не мешая тому, что открыто на экране.
+Проверки механики: `FullscreenCheck` (полный экран туда-обратно, запускать с
+`-Ddwq.nofullscreen=true`, чтобы не занимать экран) и `GhostCheck` (после ухода
+камеры в пустоту в поле должен остаться только фон). Тем же ключом
+`-Ddwq.nofullscreen=true` можно отключить захват экрана в самой программе.
+
+**Размер окна спрашивать у окна.** Система урезает его до рабочей области:
+запрос 1920×1080 превращается в 1920×1061. Кадр другого размера сдвигает
+отсечение, и текст в узких полях исчезает — на этом уже попадались.
 
 ## Стиль кода
 

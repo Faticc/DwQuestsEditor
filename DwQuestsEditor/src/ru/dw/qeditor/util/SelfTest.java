@@ -14,11 +14,14 @@ public final class SelfTest {
     public static String run() {
         StringBuilder sb = new StringBuilder();
         Config c = Config.get();
-        sb.append("Файл настроек: ").append(c.propertiesFile().getAbsolutePath()).append('\n');
-        sb.append("icon_exporter: ").append(path(c.iconsDir)).append('\n');
-        sb.append("DwQuests jar:  ").append(path(c.dwQuestsJar)).append('\n');
-        sb.append("DwCore jar:    ").append(path(c.dwCoreJar)).append('\n');
-        sb.append("client.jar:    ").append(path(c.mcClientJar)).append('\n');
+        sb.append("Программа:       ").append(Config.programDir().getAbsolutePath()).append('\n');
+        sb.append("Файл настроек:   ").append(c.propertiesFile().getAbsolutePath()).append('\n');
+        java.io.File runtime = c.runtimeDir();
+        sb.append("Каталог runtime: ")
+                .append(runtime == null ? "(нет — ресурсы внутри программы)" : runtime.getAbsolutePath())
+                .append('\n');
+        sb.append("Иконки:          ").append(path(c.iconsDir)).append('\n');
+        sb.append("Ресурсы мода:    ").append(path(c.gameDir)).append('\n');
         sb.append('\n');
 
         ItemRegistry reg = ItemRegistry.get();
@@ -42,7 +45,10 @@ public final class SelfTest {
         sb.append("Проверка иконок: ").append(ok).append('/').append(probes.length).append('\n');
         sb.append('\n');
 
+        sb.append("Иконки читаются из: ").append(ItemRegistry.get().describe()).append('\n');
+
         ModAssets assets = ModAssets.get();
+        sb.append("Ресурсы мода из:    ").append(assets.describe()).append('\n');
         for (String p : assets.problems()) sb.append("ВНИМАНИЕ: ").append(p).append('\n');
         sb.append("Фон Default: ").append(assets.defaultBackground() != null ? "есть" : "нет").append('\n');
         sb.append("Текстура звёзд: ").append(assets.stars() != null ? "есть" : "нет").append('\n');
@@ -65,7 +71,7 @@ public final class SelfTest {
     }
 
     private static String path(String p) {
-        if (Config.isBlank(p)) return "(не задан)";
+        if (Config.isBlank(p)) return "(не задан — берётся из самой программы)";
         java.io.File f = new java.io.File(p);
         return p + (f.exists() ? "  [ок]" : "  [НЕ НАЙДЕН]");
     }

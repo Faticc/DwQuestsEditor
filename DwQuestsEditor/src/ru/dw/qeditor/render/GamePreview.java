@@ -70,12 +70,6 @@ public class GamePreview {
     private int panelScroll;
     private int panelContentHeight;
 
-    /** Готовый фон карты: пересобирается только при смене вкладки, размера или сдвига. */
-    private BufferedImage backgroundCache;
-    private String backgroundKey;
-    /** Рамка окна мода: зависит только от размера, но рисуется дорого. */
-    private BufferedImage frameCache;
-    private String frameKey;
     /** Сдвиг прокрутки левой колонки, учитываемый при проверке наведения. */
     private float hoverOffsetY;
 
@@ -105,7 +99,6 @@ public class GamePreview {
         boolean changed = this.tab != tab;
         this.tab = tab;
         if (changed) {
-            backgroundCache = null;
             hoverScale.clear();
             openQuestID = null;
             panelScroll = 0;
@@ -245,8 +238,15 @@ public class GamePreview {
 
     // ------------------------------------------------------------------ отрисовка
 
-    public void render(BufferedImage target) {
-        setViewport(target.getWidth(), target.getHeight());
+    /**
+     * Нарисовать просмотр в текущий кадр.
+     *
+     * @param p         рисователь, уже сдвинутый в левый верх области просмотра
+     *                  и с масштабом guiScale
+     * @param pixelWidth  размер области в пикселях экрана
+     */
+    public void render(GuiPainter p, int pixelWidth, int pixelHeight) {
+        setViewport(pixelWidth, pixelHeight);
         layout();
         calculateMap();
         if (!mapInitialized) {
@@ -256,24 +256,19 @@ public class GamePreview {
         }
         clampMap();
 
-        GuiPainter p = GuiPainter.forImage(target, guiScale);
         boolean profile = Boolean.getBoolean("dwq.profile");
         long r0 = profile ? System.nanoTime() : 0;
         long r1 = r0, r2 = r0, r3 = r0;
-        try {
-            // рамка окна закрывает почти весь экран, заливать его целиком незачем
-            fillAround(p, guiLeft, guiTop, guiWidth, guiHeight, 0xFF0D0D12);
-            drawWindowFrame(p);
-            if (profile) r1 = System.nanoTime();
-            drawBrowser(p);
-            if (profile) r2 = System.nanoTime();
-            drawTabButtons(p);
-            if (profile) r3 = System.nanoTime();
-            if (openQuestID != null && tab != null && tab.quests.containsKey(openQuestID)) {
-                drawQuestPanel(p, tab.quests.get(openQuestID));
-            }
-        } finally {
-            p.dispose();
+        // рамка окна закрывает почти весь экран, заливать его целиком незачем
+        fillAround(p, guiLeft, guiTop, guiWidth, guiHeight, 0xFF0D0D12);
+        drawWindowFrame(p);
+        if (profile) r1 = System.nanoTime();
+        drawBrowser(p);
+        if (profile) r2 = System.nanoTime();
+        drawTabButtons(p);
+        if (profile) r3 = System.nanoTime();
+        if (openQuestID != null && tab != null && tab.quests.containsKey(openQuestID)) {
+            drawQuestPanel(p, tab.quests.get(openQuestID));
         }
         if (profile) {
             long r4 = System.nanoTime();
@@ -290,23 +285,14 @@ public class GamePreview {
         if (x + w < screenW) p.rectOpaque(x + w, y, screenW - x - w, h, color);
     }
 
-    /** Рамка окна мода из кэша: её содержимое меняется только вместе с размером. */
+    /**
+     * Рамка окна мода. Раньше она собиралась в картинку и кэшировалась —
+     * полтора десятка прямоугольников и градиент стоили слишком дорого,
+     * чтобы повторять их каждый кадр. Сейчас это полтора десятка
+     * четырёхугольников в общем пакете.
+     */
     private void drawWindowFrame(GuiPainter p) {
-        int devW = Math.max(1, Math.round(guiWidth * guiScale));
-        int devH = Math.max(1, Math.round(guiHeight * guiScale));
-        String key = devW + "x" + devH;
-        if (frameCache == null || !key.equals(frameKey)) {
-            BufferedImage img = new BufferedImage(devW, devH, BufferedImage.TYPE_INT_RGB);
-            GuiPainter fp = GuiPainter.forImage(img, guiScale);
-            try {
-                fp.guiBackground(0, 0, guiWidth, guiHeight);
-            } finally {
-                fp.dispose();
-            }
-            frameCache = img;
-            frameKey = key;
-        }
-        p.image(frameCache, guiLeft, guiTop, guiWidth, guiHeight);
+        p.guiBackground(guiLeft, guiTop, guiWidth, guiHeight);
     }
 
     private void drawBrowser(GuiPainter p) {
@@ -347,49 +333,34 @@ public class GamePreview {
     /**
      * UIBrowser.drawBackground: фон вкладки + пять слоёв Stars с параллаксом.
      *
-     * <p>Шесть тайловых заливок на всю карту стоят около 60 мс на кадр, а меняются
-     * они только при панораме и зуме. Поэтому картинка собирается один раз и потом
-     * просто выводится — анимация нодов и линий идёт поверх готового фона.
+     * <p>Шесть заливок с повторением текстуры на всю карту стоили на Java2D
+     * около 60 мс на кадр, и ради этого фон приходилось держать в картинке и
+     * пересобирать при каждой панораме. Для видеокарты это шесть
+     * четырёхугольников с GL_REPEAT — дешевле, чем вывод готовой картинки.
      */
     private void drawMapBackground(GuiPainter p) {
-        BufferedImage bg = backgroundImage();
-        if (bg == null) return;
-        p.image(bg, bx, by, bw, bh);
-    }
-
-    private BufferedImage backgroundImage() {
-        int devW = Math.max(1, Math.round(bw * guiScale));
-        int devH = Math.max(1, Math.round(bh * guiScale));
+        BufferedImage bgTex = ModAssets.get().tabBackground(tab == null ? null : tab.tabID);
+        BufferedImage stars = ModAssets.get().stars();
+        if (bgTex == null && stars == null) return;
 
         float[] uv = backgroundUv();
-        String key = (tab == null ? "-" : tab.tabID) + "|" + devW + "x" + devH
-                + "|" + Math.round(uv[0] * 8) + "," + Math.round(uv[1] * 8)
-                + "|" + Math.round(uv[2] * 8) + "," + Math.round(uv[3] * 8);
-        if (backgroundCache != null && key.equals(backgroundKey)) return backgroundCache;
+        float uBack = uv[0], vBack = uv[1], zoomedWidth = uv[2], zoomedHeight = uv[3];
+        float scaleFactor = uv[4];
 
-        // фон карты непрозрачен целиком: копия дешевле смешивания
-        BufferedImage img = new BufferedImage(devW, devH, BufferedImage.TYPE_INT_RGB);
-        GuiPainter bp = GuiPainter.forImage(img, guiScale);
-        try {
-            BufferedImage bgTex = ModAssets.get().tabBackground(tab == null ? null : tab.tabID);
-            BufferedImage stars = ModAssets.get().stars();
-            float uBack = uv[0], vBack = uv[1], zoomedWidth = uv[2], zoomedHeight = uv[3];
-            float scaleFactor = uv[4];
+        // под фоном мода всегда чёрное поле, а не градиент рамки
+        p.rectOpaque(bx, by, bw, bh, 0xFF000000);
 
-            bp.scale(1.5f);
-            bp.scale(scaleFactor);
-            bp.texturedModalRect(bgTex, 0, 0, uBack, vBack, zoomedWidth, zoomedHeight);
-            float[] layers = {1.33f, 1.77f, 2.37f, 3.16f, 4.21f};
-            for (float s : layers) {
-                bp.scale(0.75f);
-                bp.texturedModalRect(stars, 0, 0, uBack, vBack, zoomedWidth * s, zoomedHeight * s);
-            }
-        } finally {
-            bp.dispose();
+        p.push();
+        p.translate(bx, by);
+        p.scale(1.5f);
+        p.scale(scaleFactor);
+        p.texturedModalRect(bgTex, 0, 0, uBack, vBack, zoomedWidth, zoomedHeight);
+        float[] layers = {1.33f, 1.77f, 2.37f, 3.16f, 4.21f};
+        for (float s : layers) {
+            p.scale(0.75f);
+            p.texturedModalRect(stars, 0, 0, uBack, vBack, zoomedWidth * s, zoomedHeight * s);
         }
-        backgroundCache = img;
-        backgroundKey = key;
-        return img;
+        p.pop();
     }
 
     /** Расчёт окна текстуры из UIBrowser.drawBackground: {u, v, ширина, высота, масштаб}. */
@@ -506,7 +477,7 @@ public class GamePreview {
         // в её единицах ширина равна 3.5 / guiScale
         float lineWidth = 3.5f / zoomFactor;
         boolean gradient = tab.quests.size() <= 400;
-        LinkRenderer.Batch batch = LinkRenderer.batch(p, lineWidth, true, gradient);
+        float deviceWidth = lineWidth * p.deviceScale();
         for (Quest q : tab.quests.values()) {
             if (q.parents.isEmpty()) continue;
             boolean childActive = !questCompleted(q);
@@ -526,11 +497,10 @@ public class GamePreview {
                 if (!linkVisible(x1, y1, x2, y2)) continue;
                 int color = lineShine ? Defs.Star.of(q.rarity).mainColor : -13421773;
                 int parentColor = lineShine ? Defs.Star.of(pq.rarity).mainColor : -5592406;
-                batch.line(x1, y1, x2, y2, color, parentColor, lineShine,
-                        parent.lineType, tick, null);
+                LinkRenderer.line(p, x1, y1, x2, y2, color, parentColor, lineShine,
+                        parent.lineType, tick, deviceWidth, gradient);
             }
         }
-        batch.close();
     }
 
     /** Пересекает ли связь видимую часть карты (с запасом на выгиб дуги). */
@@ -965,23 +935,10 @@ public class GamePreview {
         p.push();
         p.translate(x, y);
         p.scale(0.5f);
-        p.texturedRect(tintGreen(ui), 0, 0, 50, 0, 24, 24, 1024, 1024);
+        // раньше ради зелёной галочки заводилась перекрашенная копия всей
+        // UIElements.png; теперь цвет просто умножается в шейдере
+        p.texturedRect(ui, 0, 0, 50, 0, 24, 24, 1024, 1024, 0xFF00FF00);
         p.pop();
-    }
-
-    private static BufferedImage greenUi;
-
-    private static BufferedImage tintGreen(BufferedImage src) {
-        if (greenUi != null) return greenUi;
-        BufferedImage out = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < src.getHeight(); y++) {
-            for (int x = 0; x < src.getWidth(); x++) {
-                int p = src.getRGB(x, y);
-                out.setRGB(x, y, (p & 0xFF00FF00) | ((p >>> 24) << 24));
-            }
-        }
-        greenUi = out;
-        return out;
     }
 
     // ------------------------------------------------------------------ блок наград

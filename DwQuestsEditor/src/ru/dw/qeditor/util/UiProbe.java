@@ -1,75 +1,50 @@
 package ru.dw.qeditor.util;
 
-import ru.dw.qeditor.ui.MainFrame;
-import ru.dw.qeditor.ui.theme.Theme;
+import ru.dw.qeditor.app.App;
 
-import javax.imageio.ImageIO;
-import javax.swing.SwingUtilities;
-import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 
 /**
  * Снимок окна редактора в PNG — чтобы сверять вид, не мешая работе за
- * компьютером: окно выводится за пределы экрана и рисуется программно,
+ * компьютером: окно GLFW создаётся скрытым, кадр рисуется в кадровый буфер,
  * поверх других программ ничего не всплывает.
  *
- * <p>Запуск: {@code java -cp out ru.dw.qeditor.util.UiProbe файл.png [вкладка.json] [номер раздела]}
+ * <p>Раньше для этого окно Swing уводилось за пределы экрана и печаталось
+ * через {@code printAll}. Теперь окно и так никому не видно.
+ *
+ * <p>Запуск: {@code java -cp "out;lib/*" ru.dw.qeditor.util.UiProbe файл.png
+ * [вкладка.json] [номер раздела] [ширина] [высота] [full] [scroll]
+ * [страница правой колонки]}
  */
 public final class UiProbe {
 
     private UiProbe() { }
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         String out = args.length > 0 ? args[0] : "ui-probe.png";
         String tabFile = args.length > 1 ? args[1] : null;
-        int tabIndex = args.length > 2 ? Integer.parseInt(args[2]) : 0;
+        int pageIndex = args.length > 2 ? Integer.parseInt(args[2]) : 0;
         int width = args.length > 3 ? Integer.parseInt(args[3]) : 1600;
         int height = args.length > 4 ? Integer.parseInt(args[4]) : 1000;
-        // пятым аргументом "full" — снимок без боковых панелей, как в полном экране
+        // "full" — снимок без боковых панелей, как в полном экране
         boolean chromeless = args.length > 5 && "full".equals(args[5]);
+        boolean scroll = args.length > 6 && "scroll".equals(args[6]);
+        int sidebarPage = args.length > 7 ? Integer.parseInt(args[7]) : 0;
 
-        Theme.install();
+        try (GlProbe probe = GlProbe.open(width, height)) {
+            App app = new App(probe.window(), probe.batch());
+            if (tabFile != null) app.openFile(new File(tabFile));
+            app.selectPage(pageIndex);
+            if (chromeless) app.setChromeVisible(false);
+            if (scroll) for (int i = 0; i < 5; i++) app.scrollPreviewTabs();
+            app.selectSidebarPage(sidebarPage);
 
-        final MainFrame[] holder = new MainFrame[1];
-        SwingUtilities.invokeAndWait(() -> {
-            MainFrame f = new MainFrame();
-            f.setSize(width, height);
-            f.setLocation(-6000, -6000);
-            f.setVisible(true);
-            holder[0] = f;
-        });
-        MainFrame frame = holder[0];
-
-        if (tabFile != null) SwingUtilities.invokeAndWait(() -> frame.openFileForProbe(new File(tabFile)));
-        SwingUtilities.invokeAndWait(() -> frame.selectTabForProbe(tabIndex));
-        if (chromeless) SwingUtilities.invokeAndWait(() -> frame.setChromeForProbe(false));
-        // шестым аргументом "scroll" — прокрутить список вкладок в просмотре
-        if (args.length > 6 && "scroll".equals(args[6])) {
-            SwingUtilities.invokeAndWait(() -> {
-                for (int i = 0; i < 5; i++) frame.scrollPreviewTabsForProbe();
-            });
+            BufferedImage img = probe.frameSelf(app::drawFrame);
+            if (img.getWidth() != width || img.getHeight() != height)
+                System.out.println("Окно урезано до рабочей области экрана: "
+                        + img.getWidth() + "x" + img.getHeight());
+            probe.write(new File(out), img);
         }
-
-        // дать таймерам, раскладке и первому кадру отработать
-        Thread.sleep(1200);
-        SwingUtilities.invokeAndWait(() -> {
-            frame.validate();
-            frame.repaint();
-        });
-        Thread.sleep(400);
-
-        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        SwingUtilities.invokeAndWait(() -> {
-            Graphics2D g = img.createGraphics();
-            frame.printAll(g);
-            g.dispose();
-        });
-
-        ImageIO.write(img, "png", new File(out));
-        System.out.println("Записано: " + new File(out).getAbsolutePath());
-
-        SwingUtilities.invokeAndWait(frame::dispose);
-        System.exit(0);
     }
 }

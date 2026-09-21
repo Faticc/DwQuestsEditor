@@ -1,0 +1,699 @@
+{
+  "tabID": "Начало",
+  "iconItem": "minecraft:book",
+  "sortIndex": 0,
+  "quests": {
+    "Начало_0_root": {
+      "displayX": 0,
+      "displayY": 0,
+      "displayName": "Добыча железа",
+      "description": "<BR>§eДобыча железа§r — шаг 0.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:book",
+      "rarity": "COMMON",
+      "parents": [],
+      "tasks": {
+        "0": {
+          "type": "ITEM_SMELT",
+          "requiredCount": 16,
+          "forgeName": "minecraft:cake"
+        },
+        "1": {
+          "type": "ITEM_PASS",
+          "requiredCount": 1,
+          "forgeName": "minecraft:diamond_pickaxe",
+          "parents": [
+            0
+          ]
+        }
+      },
+      "rewards": [
+        "minecraft:bucket=8"
+      ],
+      "nodeType": "NORMAL"
+    },
+    "Начало_1_root": {
+      "displayX": 0,
+      "displayY": 7,
+      "displayName": "Переработка пара",
+      "description": "<BR>§eПереработка пара§r — шаг 1.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:log",
+      "rarity": "COMMON",
+      "parents": [],
+      "tasks": {
+        "0": {
+          "type": "ENTITY_KILL",
+          "requiredCount": 25,
+          "className": "EntityZombie",
+          "displayName": "Зомби"
+        }
+      },
+      "rewards": [
+        "minecraft:blaze_rod=1"
+      ],
+      "nodeType": "UNSTABLE"
+    },
+    "Начало_2_root": {
+      "displayX": 0,
+      "displayY": 14,
+      "displayName": "Автоматизация железа",
+      "description": "<BR>§eАвтоматизация железа§r — шаг 2.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:stone",
+      "rarity": "COMMON",
+      "parents": [],
+      "tasks": {
+        "0": {
+          "type": "TASK_CONFIRM"
+        },
+        "1": {
+          "type": "ITEM_PASS",
+          "requiredCount": 16,
+          "forgeName": "minecraft:coal"
+        }
+      },
+      "rewards": [
+        "minecraft:bow=16",
+        "DwQuests:Gift:0{Layers:[0,0],DropType:\"DEFAULT\",display:{Name:\"§rНаграда за железа\",Lore:\"§7Тестовый гифт\"},Items:[{Slot:0b,ID:\"minecraft:diamond=2\"},{Slot:1b,ID:\"minecraft:emerald\"}]}"
+      ],
+      "iconSize": "DEFAULT"
+    },
+    "Начало_0_001": {
+      "displayX": 6,
+      "displayY": -1,
+      "displayName": "Магия пара",
+      "description": "<BR>§eМагия пара§r — шаг 3.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:diamond",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_0_root",
+          "parentType": "HIDDEN",
+          "lineType": "INVERTED"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "TASK_CONFIRM"
+        },
+        "1": {
+          "type": "ITEM_SMELT",
+          "requiredCount": 32,
+          "forgeName": "minecraft:bucket"
+        },
+        "2": {
+          "type": "ITEM_DETECT",
+          "requiredCount": 16,
+          "forgeName": "minecraft:iron_ingot"
+        }
+      },
+      "rewards": [
+        "minecraft:bucket=8"
+      ]
+    },
+    "Начало_1_001": {
+      "displayX": 6,
+      "displayY": 6,
+      "displayName": "Исследование железа",
+      "description": "<BR>§eИсследование железа§r — шаг 4.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:redstone",
+      "rarity": "COMMON",
+      "parents": [
+        "Начало_1_root"
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_CRAFT",
+          "requiredCount": 64,
+          "forgeName": "minecraft:slime_ball"
+        }
+      },
+      "rewards": [
+        "minecraft:glowstone_dust=16"
+      ]
+    },
+    "Начало_2_001": {
+      "displayX": 6,
+      "displayY": 14,
+      "displayName": "Строительство пара",
+      "description": "<BR>§eСтроительство пара§r — шаг 5.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:emerald",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_2_root",
+          "parentType": "FAKE"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_DETECT",
+          "requiredCount": 16,
+          "forgeName": "minecraft:flint"
+        },
+        "1": {
+          "type": "ITEM_PASS",
+          "requiredCount": 32,
+          "forgeName": "minecraft:blaze_rod",
+          "parents": [
+            0
+          ]
+        }
+      },
+      "rewards": [
+        "minecraft:log=8"
+      ],
+      "nodeType": "PURE"
+    },
+    "Начало_0_002": {
+      "displayX": 9,
+      "displayY": 1,
+      "displayName": "Торговля железа",
+      "description": "<BR>§eТорговля железа§r — шаг 6.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:nether_star",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_0_001",
+          "lineType": "INVERTED"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_PASS",
+          "requiredCount": 64,
+          "forgeName": "minecraft:emerald"
+        },
+        "1": {
+          "type": "ITEM_PASS",
+          "requiredCount": 1,
+          "forgeName": "minecraft:blaze_rod"
+        }
+      },
+      "rewards": [
+        "minecraft:gold_ingot=1"
+      ],
+      "broadcast": "&6[Квесты] &b%nick% &eвыполнил &a%quest% &eво вкладке &a%tab%&e!"
+    },
+    "Начало_1_002": {
+      "displayX": 9,
+      "displayY": 8,
+      "displayName": "Приключение пара",
+      "description": "<BR>§eПриключение пара§r — шаг 7.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:iron_ingot",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_1_root",
+          "lineType": "INVERTED"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_CRAFT",
+          "requiredCount": 32,
+          "forgeName": "minecraft:emerald"
+        }
+      },
+      "rewards": [
+        "minecraft:clay_ball=3"
+      ],
+      "nodeType": "SMOKE2"
+    },
+    "Начало_2_002": {
+      "displayX": 9,
+      "displayY": 15,
+      "displayName": "Алхимия железа",
+      "description": "<BR>§eАлхимия железа§r — шаг 8.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:gold_ingot",
+      "rarity": "COMMON",
+      "parents": [
+        "Начало_2_001"
+      ],
+      "tasks": {
+        "0": {
+          "type": "TASK_CONFIRM"
+        },
+        "1": {
+          "type": "ITEM_SMELT",
+          "requiredCount": 1,
+          "forgeName": "minecraft:iron_ingot",
+          "parents": [
+            0
+          ]
+        }
+      },
+      "rewards": [
+        "minecraft:redstone=1"
+      ],
+      "nodeType": "NORMAL"
+    },
+    "Начало_0_003": {
+      "displayX": 12,
+      "displayY": 1,
+      "displayName": "Энергия пара",
+      "description": "<BR>§eЭнергия пара§r — шаг 9.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:coal",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_0_002",
+          "parentType": "FAKE"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_SMELT",
+          "requiredCount": 64,
+          "forgeName": "minecraft:glowstone_dust"
+        },
+        "1": {
+          "type": "TASK_CONFIRM"
+        },
+        "2": {
+          "type": "ITEM_CRAFT",
+          "requiredCount": 4,
+          "forgeName": "minecraft:nether_star"
+        }
+      },
+      "rewards": [
+        "minecraft:coal=1"
+      ]
+    },
+    "Начало_1_003": {
+      "displayX": 12,
+      "displayY": 7,
+      "displayName": "Добыча железа",
+      "description": "<BR>§eДобыча железа§r — шаг 10.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:apple",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_1_002",
+          "lineType": "INVERTED"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "TASK_CONFIRM"
+        }
+      },
+      "rewards": [
+        "minecraft:emerald=16"
+      ]
+    },
+    "Начало_2_003": {
+      "displayX": 12,
+      "displayY": 15,
+      "displayName": "Переработка пара",
+      "description": "<BR>§eПереработка пара§r — шаг 11.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:bread",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_2_root",
+          "parentType": "FAKE"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_SMELT",
+          "requiredCount": 8,
+          "forgeName": "minecraft:book"
+        }
+      },
+      "rewards": [
+        "minecraft:emerald=2"
+      ]
+    },
+    "Начало_0_004": {
+      "displayX": 15,
+      "displayY": 0,
+      "displayName": "Автоматизация железа",
+      "description": "<BR>§eАвтоматизация железа§r — шаг 12.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:bucket",
+      "rarity": "COMMON",
+      "parents": [
+        "Начало_0_001"
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_PASS",
+          "requiredCount": 1,
+          "forgeName": "minecraft:flint"
+        },
+        "1": {
+          "type": "ITEM_PASS",
+          "requiredCount": 4,
+          "forgeName": "minecraft:emerald"
+        },
+        "2": {
+          "type": "ENTITY_KILL",
+          "requiredCount": 10,
+          "className": "EntityWitch",
+          "displayName": "Ведьма"
+        }
+      },
+      "rewards": [
+        "minecraft:gold_ingot=3",
+        "DwQuests:Gift:0{Layers:[0,0],DropType:\"DEFAULT\",display:{Name:\"§rНаграда за железа\",Lore:\"§7Тестовый гифт\"},Items:[{Slot:0b,ID:\"minecraft:diamond=2\"},{Slot:1b,ID:\"minecraft:emerald\"}]}"
+      ],
+      "nodeType": "HUNGRY"
+    },
+    "Начало_1_004": {
+      "displayX": 15,
+      "displayY": 7,
+      "displayName": "Магия пара",
+      "description": "<BR>§eМагия пара§r — шаг 13.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:bow",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_1_003",
+          "parentType": "FAKE"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ENTITY_KILL",
+          "requiredCount": 25,
+          "className": "EntityEnderman",
+          "displayName": "Странник Края"
+        }
+      },
+      "rewards": [
+        "minecraft:bucket=1"
+      ],
+      "broadcast": "&6[Квесты] &b%nick% &eвыполнил &a%quest% &eво вкладке &a%tab%&e!"
+    },
+    "Начало_2_004": {
+      "displayX": 15,
+      "displayY": 14,
+      "displayName": "Исследование железа",
+      "description": "<BR>§eИсследование железа§r — шаг 14.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:diamond_sword",
+      "rarity": "COMMON",
+      "parents": [
+        "Начало_2_002"
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_DETECT",
+          "requiredCount": 1,
+          "forgeName": "minecraft:bow"
+        }
+      },
+      "rewards": [
+        "minecraft:diamond=1",
+        "command:give @p minecraft:golden_apple 1"
+      ],
+      "nodeType": "SMOKE"
+    },
+    "Начало_0_005": {
+      "displayX": 18,
+      "displayY": -1,
+      "displayName": "Строительство пара",
+      "description": "<BR>§eСтроительство пара§r — шаг 15.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:diamond_pickaxe",
+      "rarity": "COMMON",
+      "parents": [
+        "Начало_0_001"
+      ],
+      "tasks": {
+        "0": {
+          "type": "TASK_CONFIRM"
+        },
+        "1": {
+          "type": "TASK_CONFIRM"
+        }
+      },
+      "rewards": [
+        "minecraft:apple=1",
+        "command:give @p minecraft:golden_apple 1"
+      ],
+      "nodeType": "SMOKE2",
+      "broadcast": "&6[Квесты] &b%nick% &eвыполнил &a%quest% &eво вкладке &a%tab%&e!"
+    },
+    "Начало_1_005": {
+      "displayX": 18,
+      "displayY": 7,
+      "displayName": "Торговля железа",
+      "description": "<BR>§eТорговля железа§r — шаг 16.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:ender_pearl",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_1_002",
+          "lineType": "INVERTED"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_PASS",
+          "requiredCount": 32,
+          "forgeName": "minecraft:blaze_rod"
+        },
+        "1": {
+          "type": "ENTITY_KILL",
+          "requiredCount": 10,
+          "className": "EntityCreeper",
+          "displayName": "Крипер",
+          "parents": [
+            0
+          ]
+        }
+      },
+      "rewards": [
+        "minecraft:nether_star=3",
+        "command:give @p minecraft:golden_apple 1"
+      ],
+      "nodeType": "NORMAL"
+    },
+    "Начало_2_005": {
+      "displayX": 18,
+      "displayY": 15,
+      "displayName": "Приключение пара",
+      "description": "<BR>§eПриключение пара§r — шаг 17.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:blaze_rod",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_2_root",
+          "lineType": "INVERTED"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "TASK_CONFIRM"
+        },
+        "1": {
+          "type": "ENTITY_KILL",
+          "requiredCount": 25,
+          "className": "EntityZombie",
+          "displayName": "Зомби"
+        }
+      },
+      "rewards": [
+        "minecraft:slime_ball=1",
+        "command:give @p minecraft:golden_apple 1",
+        "DwQuests:Gift:0{Layers:[0,0],DropType:\"DEFAULT\",display:{Name:\"§rНаграда за пара\",Lore:\"§7Тестовый гифт\"},Items:[{Slot:0b,ID:\"minecraft:diamond=2\"},{Slot:1b,ID:\"minecraft:emerald\"}]}"
+      ]
+    },
+    "Начало_0_006": {
+      "displayX": 21,
+      "displayY": 0,
+      "displayName": "Алхимия железа",
+      "description": "<BR>§eАлхимия железа§r — шаг 18.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:glowstone_dust",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_0_root",
+          "parentType": "FAKE"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_PASS",
+          "requiredCount": 1,
+          "forgeName": "minecraft:ender_pearl"
+        },
+        "1": {
+          "type": "ENTITY_KILL",
+          "requiredCount": 25,
+          "className": "EntityEnderman",
+          "displayName": "Странник Края",
+          "parents": [
+            0
+          ]
+        }
+      },
+      "rewards": [
+        "minecraft:redstone=2"
+      ],
+      "nodeType": "DARK",
+      "iconSize": "DEFAULT"
+    },
+    "Начало_1_006": {
+      "displayX": 21,
+      "displayY": 7,
+      "displayName": "Энергия пара",
+      "description": "<BR>§eЭнергия пара§r — шаг 19.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:slime_ball",
+      "rarity": "COMMON",
+      "parents": [
+        "Начало_1_004"
+      ],
+      "tasks": {
+        "0": {
+          "type": "TASK_CONFIRM"
+        },
+        "1": {
+          "type": "TASK_CONFIRM"
+        },
+        "2": {
+          "type": "ITEM_PASS",
+          "requiredCount": 8,
+          "forgeName": "minecraft:bow"
+        }
+      },
+      "rewards": [
+        "minecraft:log=2",
+        "DwQuests:Gift:0{Layers:[0,0],DropType:\"DEFAULT\",display:{Name:\"§rНаграда за пара\",Lore:\"§7Тестовый гифт\"},Items:[{Slot:0b,ID:\"minecraft:diamond=2\"},{Slot:1b,ID:\"minecraft:emerald\"}]}"
+      ],
+      "iconSize": "DEFAULT"
+    },
+    "Начало_2_006": {
+      "displayX": 21,
+      "displayY": 14,
+      "displayName": "Добыча железа",
+      "description": "<BR>§eДобыча железа§r — шаг 20.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:cake",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_2_003",
+          "parentType": "FAKE",
+          "lineType": "INVERTED"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_SMELT",
+          "requiredCount": 32,
+          "forgeName": "minecraft:book"
+        },
+        "1": {
+          "type": "ITEM_CRAFT",
+          "requiredCount": 32,
+          "forgeName": "minecraft:redstone"
+        }
+      },
+      "rewards": [
+        "minecraft:redstone=3"
+      ]
+    },
+    "Начало_0_007": {
+      "displayX": 24,
+      "displayY": -1,
+      "displayName": "Переработка пара",
+      "description": "<BR>§eПереработка пара§r — шаг 21.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:clay_ball",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_0_001",
+          "lineType": "INVERTED"
+        },
+        {
+          "questID": "Начало_1_005",
+          "lineType": "INVERTED"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_SMELT",
+          "requiredCount": 4,
+          "forgeName": "minecraft:feather"
+        },
+        "1": {
+          "type": "ITEM_CRAFT",
+          "requiredCount": 64,
+          "forgeName": "minecraft:iron_ingot",
+          "parents": [
+            0
+          ]
+        }
+      },
+      "rewards": [
+        "minecraft:stone=16"
+      ]
+    },
+    "Начало_1_007": {
+      "displayX": 24,
+      "displayY": 7,
+      "displayName": "Автоматизация железа",
+      "description": "<BR>§eАвтоматизация железа§r — шаг 22.<BR>Нужно заняться железа: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:feather",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_1_006",
+          "lineType": "INVERTED"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "ITEM_DETECT",
+          "requiredCount": 1,
+          "forgeName": "minecraft:slime_ball"
+        },
+        "1": {
+          "type": "TASK_CONFIRM"
+        },
+        "2": {
+          "type": "ITEM_CRAFT",
+          "requiredCount": 16,
+          "forgeName": "minecraft:nether_star"
+        }
+      },
+      "rewards": [
+        "minecraft:flint=1"
+      ]
+    },
+    "Начало_2_007": {
+      "displayX": 24,
+      "displayY": 14,
+      "displayName": "Магия пара",
+      "description": "<BR>§eМагия пара§r — шаг 23.<BR>Нужно заняться пара: собери требуемое и сдай квест.<RI>§7Подсказка: §fсмотри соседние ветки.§r",
+      "iconItem": "minecraft:flint",
+      "rarity": "COMMON",
+      "parents": [
+        {
+          "questID": "Начало_2_003",
+          "parentType": "FAKE"
+        }
+      ],
+      "tasks": {
+        "0": {
+          "type": "TASK_CONFIRM"
+        },
+        "1": {
+          "type": "ITEM_DETECT",
+          "requiredCount": 16,
+          "forgeName": "minecraft:iron_ingot"
+        },
+        "2": {
+          "type": "ENTITY_KILL",
+          "requiredCount": 10,
+          "className": "EntityWitch",
+          "displayName": "Ведьма"
+        }
+      },
+      "rewards": [
+        "minecraft:apple=8",
+        "command:give @p minecraft:golden_apple 1"
+      ],
+      "nodeType": "SMOKE2",
+      "tasksType": "SEQUENTIAL"
+    }
+  }
+}

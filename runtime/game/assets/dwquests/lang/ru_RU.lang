@@ -1,0 +1,61 @@
+# CreativeTab
+itemGroup.DwQuests=Dwarven Quests
+
+# Key Binding
+key.dw_quest=Открыть квесты
+
+# Items
+item.StarAtlas.name=§bЗвёздный Атлас
+item.Gift.name=Базовый Гифт
+
+# PhenBlocks
+tile.PhenLeaves.0.name=§6Кленовые листья
+tile.PhenLeaves.1.name=§eЖелтые кленовые листья
+
+# PhenItems
+item.PhenItem.0.name=§6Злая тыква
+item.PhenItem.1.name=§6Леденец из плоти зомби
+item.PhenItem.2.name=§6Тыква
+item.PhenItem.3.name=§6Тыквенная шоколадка
+item.PhenItem.4.name=§8Крылья летучей мыши
+item.PhenItem.5.name=§dВедьмино варево
+
+item.PhenItem.6.name=Манифест
+item.PhenItem.7.name=Манифест
+item.PhenItem.8.name=Манифест
+item.PhenItem.9.name=Манифест
+item.PhenItem.10.name=Манифест
+item.PhenItem.11.name=Манифест
+item.PhenItem.12.name=Манифест
+item.PhenItem.13.name=Манифест
+item.PhenItem.14.name=Манифест
+item.PhenItem.15.name=Манифест
+item.PhenItem.16.name=Манифест
+item.PhenItem.17.name=Манифест
+item.PhenItem.18.name=Манифест
+
+item.PhenItem.19.name=§2Руна яда
+item.PhenItem.20.name=§4Руна огня
+item.PhenItem.21.name=§5Руна шторма
+item.PhenItem.22.name=§6Заряженная руна
+item.PhenItem.23.name=§7Пустая руна
+item.PhenItem.24.name=§8Руна увядания
+item.PhenItem.25.name=§9Руна искажения
+item.PhenItem.26.name=§aРуна жизни
+item.PhenItem.27.name=§bРуна воды
+item.PhenItem.28.name=§bРуна удара
+item.PhenItem.29.name=§cРуна компаса
+item.PhenItem.30.name=§dЗаряженный руниум
+item.PhenItem.31.name=§dКинетическая руна
+item.PhenItem.32.name=§dРуна луны
+item.PhenItem.33.name=§eРуна силы
+item.PhenItem.34.name=§eРуна энергии
+item.PhenItem.35.name=Руна ветра
+item.PhenItem.36.name=§4Свиток Ада
+item.PhenItem.37.name=§6Свиток Огня
+item.PhenItem.38.name=§9Свиток Молнии
+item.PhenItem.39.name=§aСвиток Земли
+item.PhenItem.40.name=§bСнежинка
+
+item.ItemBoneSword.name=§8Костяной меч
+

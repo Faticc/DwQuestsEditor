@@ -7,8 +7,6 @@ import ru.dw.qeditor.model.QuestTab;
 import ru.dw.qeditor.model.Task;
 import ru.dw.qeditor.render.GamePreview;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.File;
 
 /**
@@ -19,28 +17,26 @@ public final class PreviewProbe {
 
     public static void main(String[] args) throws Exception {
         File dir = new File(args.length > 0 ? args[0] : ".");
-        QuestTab tab = demoTab();
+        QuestTab tab = args.length > 1 ? ru.dw.qeditor.io.TabIO.load(new File(args[1])) : demoTab();
 
         GamePreview gp = new GamePreview();
         gp.setTab(tab);
         gp.setGuiScale(2);
 
-        write(dir, "preview-map.png", gp, 1280, 800);
+        try (GlProbe probe = GlProbe.open()) {
+            write(probe, dir, "preview-map.png", gp, 1280, 800);
 
-        gp.openQuest("Начало");
-        write(dir, "preview-panel.png", gp, 1280, 800);
+            gp.openQuest(tab.quests.isEmpty() ? "Начало" : tab.quests.keySet().iterator().next());
+            write(probe, dir, "preview-panel.png", gp, 1280, 800);
 
-        gp.closePanel();
-        gp.setMode(GamePreview.Mode.ACTIVE);
-        write(dir, "preview-active.png", gp, 1280, 800);
+            gp.closePanel();
+            gp.setMode(GamePreview.Mode.ACTIVE);
+            write(probe, dir, "preview-active.png", gp, 1280, 800);
+        }
     }
 
-    private static void write(File dir, String name, GamePreview gp, int w, int h) throws Exception {
-        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-        gp.render(img);
-        File f = new File(dir, name);
-        ImageIO.write(img, "png", f);
-        System.out.println("Записано: " + f.getAbsolutePath());
+    private static void write(GlProbe probe, File dir, String name, GamePreview gp, int w, int h) {
+        probe.write(new File(dir, name), probe.frame(w, h, gp.getGuiScale(), p -> gp.render(p, w, h)));
     }
 
     private static QuestTab demoTab() {

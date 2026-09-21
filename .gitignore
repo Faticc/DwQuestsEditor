@@ -2,6 +2,10 @@
 DwQuestsEditor/out/
 DwQuestsEditor/*.jar
 DwQuestsEditor/sources.txt
+DwQuestsEditor/target/
+DwQuestsEditor/dist/
+# jar-ы LWJGL скачивает mvnw — в репозитории им делать нечего
+DwQuestsEditor/lib/
 
 # Локальные настройки и черновики редактора
 dwquests-editor.properties

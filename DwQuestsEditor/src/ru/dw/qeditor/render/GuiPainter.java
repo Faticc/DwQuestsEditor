@@ -1,40 +1,34 @@
 package ru.dw.qeditor.render;
 
-import ru.dw.qeditor.assets.ItemLook;
 import ru.dw.qeditor.assets.McFont;
 import ru.dw.qeditor.assets.ModAssets;
+import ru.dw.qeditor.gl.Atlas;
+import ru.dw.qeditor.gl.Batch;
+import ru.dw.qeditor.gl.GlTexture;
+import ru.dw.qeditor.gl.Textures;
 import ru.dw.qeditor.model.Defs;
 
-import java.awt.Graphics2D;
-import java.awt.Rectangle;
-import java.awt.RenderingHints;
-import java.awt.Shape;
-import java.awt.geom.AffineTransform;
-import java.awt.geom.Point2D;
-import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
-import java.awt.image.DataBufferInt;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Порт ru.sky.dw.core.client.api.gui.GuiHelper (+ Shader, NodeRenderer, UtilsFX)
- * на Java2D.
+ * на OpenGL.
  *
  * <p>Все координаты методов — «виртуальные» пиксели GUI Minecraft, ровно те же
  * числа, что в исходниках мода. Масштаб (аналог guiScale) задаётся при создании
- * и живёт в трансформации {@link Graphics2D}; шейдерные элементы (круги,
- * градиенты) при этом растеризуются в реальном разрешении экрана — как и в игре,
- * где фрагментный шейдер считается на физических пикселях.
+ * и живёт в собственной матрице: поворотов в интерфейсе нет, поэтому хватает
+ * масштаба и сдвига, а вершины считаются сразу в пикселях экрана.
  *
- * <p>Для аддитивного свечения нодов (glBlendFunc(SRC_ALPHA, ONE)) используется
- * прямая запись в int[] целевой картинки — это на порядок быстрее
- * {@link AdditiveComposite}, который остаётся запасным путём, если рисуем не в
- * int-картинку.
+ * <p>В отличие от прежней версии на Java2D здесь ничего не растеризуется на
+ * процессоре: круги и градиенты снова считает фрагментный шейдер (как
+ * {@code circle.frag} и {@code gradient.frag} в моде), тонировка нода — это
+ * цвет вершины, а аддитивное свечение — {@code glBlendFunc(GL_SRC_ALPHA, GL_ONE)},
+ * то есть ровно то, чем оно является в игре. Кэши перекрашенных спрайтов,
+ * которые раньше съедали и память, и время, исчезли вместе с надобностью.
  */
-public final class GuiPainter {
+public final class GuiPainter implements McFont.Sink {
 
     // ---- цвета GuiHelper.drawGuiBackground ------------------------------------
     public static final int BG_COLOR_1 = -13872284;
@@ -43,129 +37,145 @@ public final class GuiPainter {
     private static final int BG_HIGHLIGHT = 1157627903;
     private static final int BG_SHADOW = 1140850688;
 
-    /** Размер кадра в nodes.png / nodes2.png (2048 / 32). */
-    private static final int NODE_CELL = 64;
+    /** Кадров в анимации нода (nodes.png — сетка 32×32 клеток). */
     private static final int NODE_FRAMES = 32;
     /** UtilsFX.renderAnimatedQuadStrip(..., alpha = 0.66F, ...) */
     private static final float NODE_ALPHA = 0.66F;
 
+    private final Batch batch;
+
+    /** Текущее преобразование: только масштаб и сдвиг. */
+    private float scaleX;
+    private float scaleY;
+    private float transX;
+    private float transY;
+
+    /** Область отсечения в пикселях экрана. */
+    private float clipX, clipY, clipW, clipH;
+
+    private final Deque<float[]> stack = new ArrayDeque<>();
+
+    private GuiPainter(Batch batch, float guiScale, int viewportW, int viewportH) {
+        this.batch = batch;
+        this.scaleX = guiScale;
+        this.scaleY = guiScale;
+        this.clipX = 0;
+        this.clipY = 0;
+        this.clipW = viewportW;
+        this.clipH = viewportH;
+    }
+
     /**
-     * Крупнее этого спрайт нода не собираем. Свечение — мягкое пятно без
-     * мелких деталей, на экране растяжение незаметно, зато пересборка кадра
-     * анимации (а он меняется каждый тик) стоит втрое дешевле.
+     * Рисование в текущий кадр.
+     *
+     * @param guiScale во сколько раз виртуальный пиксель крупнее экранного
      */
-    private static final int NODE_SPRITE_MAX = 160;
-
-    private final Graphics2D g;
-    private final boolean ownsGraphics;
-
-    private final int[] targetPx;
-    private final int targetW;
-    private final int targetH;
-    private final boolean targetPremultiplied;
-
-    private static final AffineTransform IDENTITY = new AffineTransform();
-
-    private final Deque<Object[]> stack = new ArrayDeque<>();
-
-    // ------------------------------------------------------------------ создание
-
-    /**
-     * Рисование в картинку. Предпочтительный вариант: даёт быстрый аддитивный
-     * блендинг нодов. Картинка должна быть TYPE_INT_ARGB / _ARGB_PRE / _RGB.
-     */
-    public static GuiPainter forImage(BufferedImage target, float guiScale) {
-        Graphics2D g = target.createGraphics();
-        return new GuiPainter(g, true, target, guiScale);
+    public static GuiPainter of(Batch batch, float guiScale, int viewportW, int viewportH) {
+        return new GuiPainter(batch, guiScale, viewportW, viewportH);
     }
 
-    /** Рисование в чужой Graphics2D (например, прямо в компонент Swing). */
-    public static GuiPainter forGraphics(Graphics2D g, float guiScale) {
-        return new GuiPainter((Graphics2D) g.create(), true, null, guiScale);
-    }
-
-    private GuiPainter(Graphics2D g, boolean ownsGraphics, BufferedImage target, float guiScale) {
-        this.g = g;
-        this.ownsGraphics = ownsGraphics;
-
-        int[] px = null;
-        int w = 0, h = 0;
-        boolean pre = false;
-        if (target != null) {
-            int type = target.getType();
-            if ((type == BufferedImage.TYPE_INT_ARGB || type == BufferedImage.TYPE_INT_ARGB_PRE
-                    || type == BufferedImage.TYPE_INT_RGB)
-                    && target.getRaster().getDataBuffer() instanceof DataBufferInt) {
-                px = ((DataBufferInt) target.getRaster().getDataBuffer()).getData();
-                w = target.getWidth();
-                h = target.getHeight();
-                pre = type == BufferedImage.TYPE_INT_ARGB_PRE;
-            }
-        }
-        this.targetPx = px;
-        this.targetW = w;
-        this.targetH = h;
-        this.targetPremultiplied = pre;
-
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
-        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
-        g.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_SPEED);
-        g.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_SPEED);
-        g.scale(guiScale, guiScale);
-    }
-
+    /** Осталось от версии на Java2D: в GL закрывать нечего, состояние в стеке. */
     public void dispose() {
-        if (ownsGraphics) g.dispose();
+        applyClip();
     }
 
-    /** Graphics2D в виртуальных координатах — для McFont и нестандартной отрисовки. */
-    public Graphics2D g2() { return g; }
+    public Batch batch() { return batch; }
 
     /** Сколько физических пикселей приходится на один виртуальный. */
-    public float deviceScale() { return (float) g.getTransform().getScaleX(); }
+    public float deviceScale() { return scaleX; }
 
     // ------------------------------------------------------------------ состояние
 
     public void push() {
-        stack.push(new Object[]{ g.getTransform(), g.getClip() });
+        stack.push(new float[]{scaleX, scaleY, transX, transY, clipX, clipY, clipW, clipH});
     }
 
     public void pop() {
-        Object[] s = stack.pop();
-        g.setTransform((AffineTransform) s[0]);
-        g.setClip((Shape) s[1]);
+        float[] s = stack.pop();
+        scaleX = s[0];
+        scaleY = s[1];
+        transX = s[2];
+        transY = s[3];
+        clipX = s[4];
+        clipY = s[5];
+        clipW = s[6];
+        clipH = s[7];
+        applyClip();
     }
 
-    public void translate(float x, float y) { g.translate(x, y); }
+    public void translate(float x, float y) {
+        transX += x * scaleX;
+        transY += y * scaleY;
+    }
 
-    public void scale(float s) { g.scale(s, s); }
+    public void scale(float s) { scale(s, s); }
 
-    public void scale(float sx, float sy) { g.scale(sx, sy); }
+    public void scale(float sx, float sy) {
+        scaleX *= sx;
+        scaleY *= sy;
+    }
 
     /** Пересечение с текущей областью отсечения — аналог GuiHelper.glScissor. */
     public void clip(float x, float y, float width, float height) {
-        g.clip(new Rectangle2D.Float(x, y, width, height));
+        float x1 = dx(x), y1 = dy(y);
+        float x2 = dx(x + width), y2 = dy(y + height);
+        float nx = Math.max(clipX, Math.min(x1, x2));
+        float ny = Math.max(clipY, Math.min(y1, y2));
+        float nx2 = Math.min(clipX + clipW, Math.max(x1, x2));
+        float ny2 = Math.min(clipY + clipH, Math.max(y1, y2));
+        clipX = nx;
+        clipY = ny;
+        clipW = Math.max(0, nx2 - nx);
+        clipH = Math.max(0, ny2 - ny);
+        applyClip();
     }
 
     public void clipReset(float x, float y, float width, float height) {
-        g.setClip(new Rectangle2D.Float(x, y, width, height));
+        clipX = dx(x);
+        clipY = dy(y);
+        clipW = Math.max(0, width * scaleX);
+        clipH = Math.max(0, height * scaleY);
+        applyClip();
     }
+
+    private void applyClip() {
+        batch.scissor(Math.round(clipX), Math.round(clipY), Math.round(clipW), Math.round(clipH));
+    }
+
+    private float dx(float x) { return x * scaleX + transX; }
+
+    private float dy(float y) { return y * scaleY + transY; }
+
+    /** Виртуальная координата → пиксель экрана. Нужна тем, кто кладёт вершины сам. */
+    public float deviceX(float x) { return dx(x); }
+
+    public float deviceY(float y) { return dy(y); }
 
     // ------------------------------------------------------------------ прямоугольники
 
-    /** GuiHelper.drawRectangleWithBlend — с учётом альфы. */
+    /** GuiHelper.drawRectangleWithBlend — с учётом альфы. Он же приёмник полосок McFont. */
+    @Override
     public void rect(float x, float y, float width, float height, int color) {
         if (width <= 0 || height <= 0 || (color >>> 24) == 0) return;
-        g.setColor(awt(color));
-        g.fill(new Rectangle2D.Float(x, y, width, height));
+        fillDevice(dx(x), dy(y), width * scaleX, height * scaleY, color);
     }
 
-    /** GuiHelper.drawRectangle — glColor3f, то есть альфа игнорируется (всегда непрозрачно). */
+    /** GuiHelper.drawRectangle — glColor3f, то есть альфа игнорируется. */
     public void rectOpaque(float x, float y, float width, float height, int color) {
         if (width <= 0 || height <= 0) return;
-        g.setColor(awt(color | 0xFF000000));
-        g.fill(new Rectangle2D.Float(x, y, width, height));
+        fillDevice(dx(x), dy(y), width * scaleX, height * scaleY, color | 0xFF000000);
+    }
+
+    /**
+     * Заливка прямоугольника с привязкой к целым пикселям экрана: иначе
+     * однопиксельные линии интерфейса то пропадают, то удваиваются.
+     */
+    private void fillDevice(float x, float y, float w, float h, int color) {
+        int x0 = Math.round(x);
+        int y0 = Math.round(y);
+        int x1 = Math.round(x + w);
+        int y1 = Math.round(y + h);
+        batch.solid(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0), color);
     }
 
     /** GuiHelper.drawHorizontalLine */
@@ -197,11 +207,8 @@ public final class GuiPainter {
     public void gradient(float x, float y, int width, int height,
                          int colorStart, int colorMiddle, int colorEnd, int angle) {
         if (width <= 0 || height <= 0) return;
-        float s = deviceScale();
-        int dw = Math.max(1, Math.round(width * s));
-        int dh = Math.max(1, Math.round(height * s));
-        BufferedImage img = Fx.gradient(dw, dh, colorStart, colorMiddle, colorEnd, angle);
-        if (img != null) blit(img, x, y, width, height, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        batch.gradient(dx(x), dy(y), width * scaleX, height * scaleY,
+                colorStart, colorMiddle, colorEnd, angle);
     }
 
     /** GuiHelper.drawLineShadow — градиент «цвет → прозрачный». */
@@ -266,27 +273,48 @@ public final class GuiPainter {
     private void gradientMinecraftGui(float x, float y, int width, int height,
                                       int colorStart, int colorMiddle, int colorEnd, int angle) {
         if (width <= 0 || height <= 0) return;
-        float s = deviceScale();
-        int dw = Math.max(1, Math.round(width * s));
-        int dh = Math.max(1, Math.round(height * s));
-        BufferedImage img = Fx.gradient(dw, dh, colorStart, colorMiddle, colorEnd, angle);
-        if (img == null) return;
-        blitPart(img, x, y, width, height, x, y + 1f, 1f, height - 2);
-        blitPart(img, x, y, width, height, x + 1f, y, width - 2, height);
-        blitPart(img, x, y, width, height, x + width - 1f, y + 1f, 1f, height - 2);
+        gradientPart(x, y, width, height, 0, 1f / height, 1f / width, 1f - 1f / height,
+                colorStart, colorMiddle, colorEnd, angle);
+        gradientPart(x, y, width, height, 1f / width, 0, 1f - 1f / width, 1f,
+                colorStart, colorMiddle, colorEnd, angle);
+        gradientPart(x, y, width, height, 1f - 1f / width, 1f / height, 1f, 1f - 1f / height,
+                colorStart, colorMiddle, colorEnd, angle);
     }
 
     /**
-     * Рисует кусок заранее растеризованной картинки: картинка занимает
-     * прямоугольник (ox, oy, ow, oh), а показывается только часть (cx, cy, cw, ch).
+     * Кусок градиента: цвет считается так, будто нарисован весь прямоугольник,
+     * а показывается только доля (u1,v1)…(u2,v2).
      */
-    private void blitPart(BufferedImage img, float ox, float oy, float ow, float oh,
-                          float cx, float cy, float cw, float ch) {
-        if (cw <= 0 || ch <= 0) return;
-        push();
-        clip(cx, cy, cw, ch);
-        blit(img, ox, oy, ow, oh, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        pop();
+    private void gradientPart(float x, float y, int width, int height,
+                              float u1, float v1, float u2, float v2,
+                              int colorStart, int colorMiddle, int colorEnd, int angleDeg) {
+        float w = width * scaleX;
+        float h = height * scaleY;
+        float px = dx(x) + u1 * w;
+        float py = dy(y) + v1 * h;
+        float pw = (u2 - u1) * w;
+        float ph = (v2 - v1) * h;
+        if (pw <= 0 || ph <= 0) return;
+        batch.noTexture();
+        batch.quad(px, py, pw, ph, u1, v1, u2, v2,
+                colorStart, colorMiddle, colorEnd,
+                (float) Math.toRadians(angleDeg + 90.0), w, h, 0, Batch.MODE_GRADIENT);
+    }
+
+    /**
+     * Прямоугольник со скруглёнными углами и рамкой — этого в моде нет, это
+     * язык интерфейса самого редактора.
+     */
+    public void roundRect(float x, float y, float width, float height, float radius,
+                          int fill, int border, float thickness) {
+        if (width <= 0 || height <= 0) return;
+        batch.roundRect(dx(x), dy(y), width * scaleX, height * scaleY,
+                radius * scaleX, fill, border, thickness * scaleX);
+    }
+
+    /** Отрезок заданной толщины (в виртуальных единицах). */
+    public void segment(float x1, float y1, float x2, float y2, float width, int color) {
+        batch.segment(dx(x1), dy(y1), dx(x2), dy(y2), width * scaleX, color, color);
     }
 
     // ------------------------------------------------------------------ круги (Shader.CIRCLE)
@@ -299,11 +327,8 @@ public final class GuiPainter {
     public void circle(float x, float y, int width, int height, int color, int shadowColor,
                        float smoothEdge, float shadowSize, int shadowType) {
         if (width <= 0 || height <= 0) return;
-        float s = deviceScale();
-        int dw = Math.max(1, Math.round(width * s));
-        int dh = Math.max(1, Math.round(height * s));
-        BufferedImage img = Fx.circle(dw, dh, color, shadowColor, smoothEdge, shadowSize, shadowType);
-        if (img != null) blit(img, x, y, width, height, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        batch.circle(dx(x), dy(y), width * scaleX, height * scaleY,
+                color, shadowColor, smoothEdge, shadowSize, shadowType);
     }
 
     // ------------------------------------------------------------------ слот
@@ -327,11 +352,16 @@ public final class GuiPainter {
 
     /** Картинка целиком в заданный прямоугольник, «пиксельно» (как GL_NEAREST). */
     public void image(BufferedImage img, float x, float y, float width, float height) {
-        if (img != null) blit(img, x, y, width, height, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        drawTexture(Textures.pixel(img), x, y, width, height, 0, 0, 1, 1, 0xFFFFFFFF);
     }
 
     public void imageSmooth(BufferedImage img, float x, float y, float width, float height) {
-        if (img != null) blit(img, x, y, width, height, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        drawTexture(Textures.smooth(img), x, y, width, height, 0, 0, 1, 1, 0xFFFFFFFF);
+    }
+
+    /** Готовая текстура — ей пользуется интерфейс редактора. */
+    public void texture(GlTexture tex, float x, float y, float width, float height, int tint) {
+        drawTexture(tex, x, y, width, height, 0, 0, 1, 1, tint);
     }
 
     /**
@@ -357,16 +387,22 @@ public final class GuiPainter {
      */
     public void texturedRect(BufferedImage tex, float x, float y, float u, float v,
                              float width, float height, int textureWidth, int textureHeight) {
+        texturedRect(tex, x, y, u, v, width, height, textureWidth, textureHeight, 0xFFFFFFFF);
+    }
+
+    /** То же, но с умножением на цвет: так красится, например, зелёная галочка. */
+    public void texturedRect(BufferedImage tex, float x, float y, float u, float v,
+                             float width, float height, int textureWidth, int textureHeight, int tint) {
         if (tex == null) return;
-        uvRect(tex, x, y, width, height,
+        drawTexture(Textures.pixel(tex), x, y, width, height,
                 u / textureWidth, v / textureHeight,
-                (u + width) / textureWidth, (v + height) / textureHeight, false, false);
+                (u + width) / textureWidth, (v + height) / textureHeight, tint);
     }
 
     /**
-     * Рисует прямоугольник текстуры по UV в диапазоне 0..1. Выход за края
-     * допустим — текстура повторяется, как GL_REPEAT (именно на этом держится
-     * параллакс фона в UIQuestBrowser).
+     * Прямоугольник текстуры по UV в диапазоне 0..1. Выход за края допустим —
+     * текстура повторяется (GL_REPEAT), именно на этом держится параллакс фона
+     * в UIQuestBrowser.
      */
     public void uvRect(BufferedImage tex, float x, float y, float width, float height,
                        float u1, float v1, float u2, float v2, boolean flippedX, boolean flippedY) {
@@ -374,21 +410,38 @@ public final class GuiPainter {
         if (flippedX) { float t = u1; u1 = u2; u2 = t; }
         if (flippedY) { float t = v1; v1 = v2; v2 = t; }
         if (u1 == u2 || v1 == v2) return;
+        boolean tiles = u1 < 0 || v1 < 0 || u2 > 1 || v2 > 1;
+        GlTexture t = tiles ? Textures.pixelRepeating(tex) : Textures.pixel(tex);
+        drawTexture(t, x, y, width, height, u1, v1, u2, v2, 0xFFFFFFFF);
+    }
 
-        int tw = tex.getWidth();
-        int th = tex.getHeight();
-        float sx1 = u1 * tw, sx2 = u2 * tw;
-        float sy1 = v1 * th, sy2 = v2 * th;
+    private void drawTexture(GlTexture tex, float x, float y, float width, float height,
+                             float u1, float v1, float u2, float v2, int tint) {
+        if (tex == null || width <= 0 || height <= 0) return;
+        batch.texture(tex);
+        batch.sprite(dx(x), dy(y), width * scaleX, height * scaleY, u1, v1, u2, v2, tint);
+    }
 
-        push();
-        clip(x, y, width, height);
-        g.translate(x, y);
-        g.scale(width / (sx2 - sx1), height / (sy2 - sy1));
-        g.translate(-sx1, -sy1);
-        g.setPaint(new java.awt.TexturePaint(tex, new Rectangle2D.Float(0, 0, tw, th)));
-        g.fill(new Rectangle2D.Float(Math.min(sx1, sx2), Math.min(sy1, sy2),
-                Math.abs(sx2 - sx1), Math.abs(sy2 - sy1)));
-        pop();
+    /** Кусок атласа как картинка. */
+    public void region(Atlas.Region r, float x, float y, float width, float height, int tint) {
+        if (r == null || !r.valid()) return;
+        batch.texture(r.page());
+        batch.sprite(dx(x), dy(y), width * scaleX, height * scaleY,
+                r.u1(), r.v1(), r.u2(), r.v2(), tint);
+    }
+
+    /**
+     * Кусок атласа как силуэт: цвет берётся из аргумента, из текстуры — только
+     * прозрачность. Так рисуются глифы интерфейса, лежащие в атласе серым.
+     */
+    public void regionMask(Atlas.Region r, float x, float y, float width, float height, int color) {
+        if (r == null || !r.valid()) return;
+        batch.texture(r.page());
+        // текст должен попадать в целые экранные точки, иначе мылится
+        float px = Math.round(dx(x));
+        float py = Math.round(dy(y));
+        batch.mask(px, py, Math.round(width * scaleX), Math.round(height * scaleY),
+                r.u1(), r.v1(), r.u2(), r.v2(), color);
     }
 
     // ------------------------------------------------------------------ предметы
@@ -400,30 +453,41 @@ public final class GuiPainter {
 
     /** Иконка предмета размером 16·scale. */
     public void item(String forgeName, float x, float y, float scale) {
+        Atlas.Region r = Textures.item(forgeName);
+        if (r == null) return;
         float size = 16f * scale;
-        int dev = Math.max(1, Math.round(size * deviceScale()));
-        BufferedImage icon = itemIcon(forgeName, dev);
-        if (icon != null) blit(icon, x, y, size, size, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        batch.texture(r.page());
+        batch.sprite(dx(x), dy(y), size * scaleX, size * scaleY, r.u1(), r.v1(), r.u2(), r.v2(), 0xFFFFFFFF);
     }
 
     /**
      * GuiHelper.drawItemWithOutline — предмет 16·scale с обводкой.
-     * outlineSize задан в физических пикселях (в моде обводка делается по
-     * текстуре кадрового буфера), как в QuestPanel: 1.
+     *
+     * <p>В моде обводка — отдельный проход по текстуре кадрового буфера
+     * (outline.frag). Здесь тот же результат даёт силуэт иконки, восемь раз
+     * выведенный со сдвигом в пиксель: для обводки в один пиксель это в точности
+     * расширение по восьми соседям, только без второго буфера.
      */
     public void itemWithOutline(String forgeName, float x, float y, float scale, int color, int outlineSize) {
         if (outlineSize <= 0) {
             item(forgeName, x, y, scale);
             return;
         }
+        Atlas.Region r = Textures.item(forgeName);
+        if (r == null) return;
+
         float size = 16f * scale;
-        float s = deviceScale();
-        int dev = Math.max(1, Math.round(size * s));
-        BufferedImage img = itemOutlineIcon(forgeName, dev, color, outlineSize);
-        if (img == null) return;
-        float pad = outlineSize / s;
-        float full = (dev + outlineSize * 2) / s;
-        blit(img, x - pad, y - pad, full, full, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        float step = outlineSize / scaleX;                 // пиксель экрана в виртуальных
+        int outline = color | 0xFF000000;
+        batch.texture(r.page());
+        for (int oy = -1; oy <= 1; oy++) {
+            for (int ox = -1; ox <= 1; ox++) {
+                if (ox == 0 && oy == 0) continue;
+                batch.mask(dx(x + ox * step), dy(y + oy * step), size * scaleX, size * scaleY,
+                        r.u1(), r.v1(), r.u2(), r.v2(), outline);
+            }
+        }
+        batch.sprite(dx(x), dy(y), size * scaleX, size * scaleY, r.u1(), r.v1(), r.u2(), r.v2(), 0xFFFFFFFF);
     }
 
     // ------------------------------------------------------------------ ноды и звёзды
@@ -465,8 +529,13 @@ public final class GuiPainter {
     }
 
     /**
-     * NodeRenderer.render: анимированный кадр из nodes.png / nodes2.png размером
+     * NodeRenderer.render: кадр анимации из nodes.png / nodes2.png размером
      * size × size с центром в (cx, cy), окрашенный в color с альфой 0.66.
+     *
+     * <p>Раньше это было самым дорогим местом редактора: каждый узел — своя
+     * перекрашенная картинка и смешивание ~280×280 точек на процессоре. Теперь
+     * это один четырёхугольник с цветом вершины, а сложение цветов делает
+     * видеокарта — как и в самом моде.
      */
     public void node(float cx, float cy, Defs.NodeType nodeType, float size, int color, int tick) {
         int strip = 1;
@@ -483,17 +552,24 @@ public final class GuiPainter {
             case SMOKE2:   strip = 1; additive = false; size *= 0.5f; second = true; break;
             default:       additive = true; break;
         }
+        BufferedImage atlas = second ? ModAssets.get().nodes2() : ModAssets.get().nodes();
+        GlTexture tex = Textures.smooth(atlas);
+        if (tex == null) return;
+
         int part = Math.floorMod(tick, NODE_FRAMES);
         int cframe = NODE_FRAMES - 1 - part;
+        float cell = 1f / NODE_FRAMES;
+        float u1 = cframe * cell;
+        float v1 = strip * cell;
 
-        int dev = Math.max(1, Math.round(size * deviceScale()));
-        BufferedImage sprite = nodeSprite(second, strip, cframe, color, Math.min(dev, NODE_SPRITE_MAX));
-        if (sprite == null) return;
-
+        int tint = ((int) (NODE_ALPHA * 255f) << 24) | (color & 0xFFFFFF);
         float x = cx - size / 2f;
         float y = cy - size / 2f;
-        if (additive) additiveBlit(sprite, x, y, dev, dev);
-        else blit(sprite, x, y, size, size, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+
+        batch.texture(tex);
+        if (additive) batch.blend(Batch.BLEND_ADDITIVE);
+        batch.sprite(dx(x), dy(y), size * scaleX, size * scaleY, u1, v1, u1 + cell, v1 + cell, tint);
+        if (additive) batch.blend(Batch.BLEND_NORMAL);
     }
 
     // ------------------------------------------------------------------ текст
@@ -501,298 +577,49 @@ public final class GuiPainter {
     public int textWidth(String text) { return McFont.get().width(text); }
 
     public float text(String text, float x, float y, int color, boolean shadow) {
-        return McFont.get().draw(g, text, x, y, color, shadow);
+        return McFont.get().draw(this, text, x, y, color, shadow);
     }
 
     /** GuiHelper.drawCenterString */
     public float textCentered(String text, float centerX, float y, int color, boolean shadow) {
-        return McFont.get().drawCentered(g, text, centerX, y, color, shadow);
+        return McFont.get().drawCentered(this, text, centerX, y, color, shadow);
     }
 
-    // ------------------------------------------------------------------ внутреннее
+    // ---- приёмник глифов McFont ----------------------------------------------
 
-    private void blit(BufferedImage img, float x, float y, float width, float height, Object interpolation) {
-        if (img == null || width <= 0 || height <= 0) return;
+    @Override
+    public void glyph(BufferedImage page, float gx, float gy, float gw, float gh,
+                      int sx, int sy, int sw, int sh, boolean italic, int color) {
+        GlTexture tex = Textures.pixel(page);
+        if (tex == null) return;
+        float u1 = sx / (float) tex.width();
+        float v1 = sy / (float) tex.height();
+        float u2 = (sx + sw) / (float) tex.width();
+        float v2 = (sy + sh) / (float) tex.height();
 
-        // Картинки шейдеров, нодов и иконок растеризуются сразу в экранном
-        // размере, поэтому почти всегда выводятся один в один. Общий путь
-        // Java2D с трансформацией и фильтрацией для этого лишний и заметно
-        // дороже обычного копирования — ловим такой случай отдельно.
-        AffineTransform at0 = g.getTransform();
-        double sx = at0.getScaleX();
-        double sy = at0.getScaleY();
-        if (at0.getShearX() == 0 && at0.getShearY() == 0) {
-            double devW = width * sx;
-            double devH = height * sy;
-            if (Math.abs(devW - img.getWidth()) < 0.51 && Math.abs(devH - img.getHeight()) < 0.51) {
-                double devX = x * sx + at0.getTranslateX();
-                double devY = y * sy + at0.getTranslateY();
-                Shape clip = g.getClip();
-                Shape devClip = clip == null ? null : at0.createTransformedShape(clip);
-                g.setTransform(IDENTITY);
-                if (devClip != null) g.setClip(devClip);
-                g.drawImage(img, (int) Math.round(devX), (int) Math.round(devY), null);
-                g.setTransform(at0);
-                if (clip != null) g.setClip(clip);
-                return;
-            }
-        }
+        float x1 = dx(gx);
+        float y1 = dy(gy);
+        float x2 = dx(gx + gw);
+        float y2 = dy(gy + gh);
 
-        Object old = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, interpolation);
-        AffineTransform at = new AffineTransform(
-                width / img.getWidth(), 0, 0, height / img.getHeight(), x, y);
-        g.drawImage(img, at, null);
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                old == null ? RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR : old);
-    }
-
-    /**
-     * glBlendFunc(GL_SRC_ALPHA, GL_ONE). Картинка уже в физическом размере и с
-     * предумноженной альфой; пишем прямо в пиксели цели.
-     */
-    private void additiveBlit(BufferedImage sprite, float x, float y, int devW, int devH) {
-        if (targetPx == null) {
-            java.awt.Composite old = g.getComposite();
-            g.setComposite(AdditiveComposite.INSTANCE);
-            float scale = deviceScale();
-            blit(sprite, x, y, devW / scale, devH / scale, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            g.setComposite(old);
+        batch.texture(tex);
+        if (!italic) {
+            batch.sprite(x1, y1, x2 - x1, y2 - y1, u1, v1, u2, v2, color);
             return;
         }
-
-        AffineTransform at = g.getTransform();
-        Point2D p = at.transform(new Point2D.Float(x, y), null);
-        int dx = (int) Math.round(p.getX());
-        int dy = (int) Math.round(p.getY());
-
-        Rectangle clip = deviceClip();
-        int sw = sprite.getWidth();
-        int sh = sprite.getHeight();
-
-        int x0 = Math.max(dx, Math.max(0, clip.x));
-        int y0 = Math.max(dy, Math.max(0, clip.y));
-        int x1 = Math.min(dx + devW, Math.min(targetW, clip.x + clip.width));
-        int y1 = Math.min(dy + devH, Math.min(targetH, clip.y + clip.height));
-        if (x0 >= x1 || y0 >= y1) return;
-
-        int[] src = ((DataBufferInt) sprite.getRaster().getDataBuffer()).getData();
-        // спрайт может быть мельче места на экране — растягиваем ближайшим
-        // соседом в целочисленной арифметике, свечение от этого не страдает
-        int stepX = (int) (((long) sw << 16) / devW);
-        int stepY = (int) (((long) sh << 16) / devH);
-
-        for (int yy = y0; yy < y1; yy++) {
-            int sy = ((yy - dy) * stepY) >> 16;
-            if (sy >= sh) sy = sh - 1;
-            int sRow = sy * sw;
-            int dRow = yy * targetW;
-            for (int xx = x0; xx < x1; xx++) {
-                int sx = ((xx - dx) * stepX) >> 16;
-                if (sx >= sw) sx = sw - 1;
-                int s = src[sRow + sx];
-                if ((s & 0x00FFFFFF) == 0) continue;
-                int di = dRow + xx;
-                int d = targetPx[di];
-                int r = (d >> 16 & 255) + (s >> 16 & 255);
-                int gg = (d >> 8 & 255) + (s >> 8 & 255);
-                int b = (d & 255) + (s & 255);
-                if (r > 255) r = 255;
-                if (gg > 255) gg = 255;
-                if (b > 255) b = 255;
-                int a = d >>> 24;
-                if (targetPremultiplied || a != 0) {
-                    a += s >>> 24;
-                    if (a > 255) a = 255;
-                } else {
-                    a = s >>> 24;
-                }
-                targetPx[di] = a << 24 | r << 16 | gg << 8 | b;
-            }
-        }
+        // курсив в FontRenderer — это сдвиг вершин: верх вправо, низ влево
+        float shift = scaleX;
+        batch.quadUv(x1 + shift, y1, u1, v1,
+                x2 + shift, y1, u2, v1,
+                x2 - shift, y2, u2, v2,
+                x1 - shift, y2, u1, v2,
+                color, Batch.MODE_TEXTURE);
     }
 
-    private Rectangle deviceClip() {
-        Shape clip = g.getClip();
-        if (clip == null) return new Rectangle(0, 0, targetW, targetH);
-        return g.getTransform().createTransformedShape(clip).getBounds();
-    }
+    // ------------------------------------------------------------------ ресурсы
 
-    // ------------------------------------------------------------------ кэши картинок
-
-    private static final Map<Integer, java.awt.Color> COLORS =
-            new LinkedHashMap<Integer, java.awt.Color>(128, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<Integer, java.awt.Color> eldest) {
-                    return size() > 256;
-                }
-            };
-
-    /** ARGB int → java.awt.Color с кэшем: цветов в GUI мало, а прямоугольников много. */
-    public static java.awt.Color awt(int argb) {
-        java.awt.Color c = COLORS.get(argb);
-        if (c == null) {
-            c = new java.awt.Color(argb, true);
-            COLORS.put(argb, c);
-        }
-        return c;
-    }
-
-    /**
-     * Кэши раздельные не случайно: кадров анимации нода 32 на каждую пару
-     * «тип × цвет», а иконок предметов на большой вкладке под четыре сотни.
-     * В общем кэше они вытесняли друг друга, и каждый второй кадр приходилось
-     * заново собирать все спрайты нодов — отсюда были скачки времени вдвое.
-     */
-    private static Map<String, BufferedImage> lru(int limit) {
-        return new LinkedHashMap<String, BufferedImage>(64, 0.75f, true) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<String, BufferedImage> eldest) {
-                return size() > limit;
-            }
-        };
-    }
-
-    private static final Map<String, BufferedImage> NODE_CACHE = lru(1200);
-    private static final Map<String, BufferedImage> ITEM_CACHE = lru(3000);
-    private static final Map<String, BufferedImage> OUTLINE_CACHE = lru(256);
-
+    /** Пути к ресурсам сменились — загруженные текстуры больше не годятся. */
     public static void clearCaches() {
-        NODE_CACHE.clear();
-        ITEM_CACHE.clear();
-        OUTLINE_CACHE.clear();
-        Fx.clearCaches();
-    }
-
-    /** Иконка предмета, приведённая к нужному размеру в физических пикселях. */
-    private static BufferedImage itemIcon(String forgeName, int devSize) {
-        String key = forgeName + "|" + devSize;
-        BufferedImage cached = ITEM_CACHE.get(key);
-        if (cached != null) return cached;
-        BufferedImage src = ItemLook.icon(forgeName);
-        if (src == null) return null;
-        BufferedImage out = resize(src, devSize, devSize);
-        ITEM_CACHE.put(key, out);
-        return out;
-    }
-
-    /** Иконка с обводкой: дилатация альфы на outline физических пикселей (outline.frag). */
-    private static BufferedImage itemOutlineIcon(String forgeName, int devSize, int color, int outline) {
-        String key = forgeName + "|" + devSize + "|" + color + "|" + outline;
-        BufferedImage cached = OUTLINE_CACHE.get(key);
-        if (cached != null) return cached;
-
-        BufferedImage icon = itemIcon(forgeName, devSize);
-        if (icon == null) return null;
-
-        int w = devSize + outline * 2;
-        BufferedImage out = new BufferedImage(w, w, BufferedImage.TYPE_INT_ARGB);
-        int[] dst = ((DataBufferInt) out.getRaster().getDataBuffer()).getData();
-        int[] src = new int[devSize * devSize];
-        icon.getRGB(0, 0, devSize, devSize, src, 0, devSize);
-
-        int oc = color | 0xFF000000;
-        for (int y = 0; y < w; y++) {
-            for (int x = 0; x < w; x++) {
-                int ix = x - outline;
-                int iy = y - outline;
-                if (ix >= 0 && iy >= 0 && ix < devSize && iy < devSize && (src[iy * devSize + ix] >>> 24) != 0) {
-                    dst[y * w + x] = src[iy * devSize + ix];
-                    continue;
-                }
-                boolean near = false;
-                for (int j = -outline; j <= outline && !near; j++) {
-                    int ny = iy + j;
-                    if (ny < 0 || ny >= devSize) continue;
-                    for (int i = -outline; i <= outline; i++) {
-                        int nx = ix + i;
-                        if (nx < 0 || nx >= devSize) continue;
-                        if ((src[ny * devSize + nx] >>> 24) != 0) { near = true; break; }
-                    }
-                }
-                if (near) dst[y * w + x] = oc;
-            }
-        }
-        OUTLINE_CACHE.put(key, out);
-        return out;
-    }
-
-    /**
-     * Кадр нода: клетка 64×64 из атласа, окрашенная в color с альфой 0.66,
-     * растянутая до devSize и с предумноженной альфой (TYPE_INT_ARGB_PRE).
-     */
-    private static BufferedImage nodeSprite(boolean second, int strip, int cframe, int color, int devSize) {
-        String key = (second ? 2 : 1) + "|" + strip + "|" + cframe + "|" + color + "|" + devSize;
-        BufferedImage cached = NODE_CACHE.get(key);
-        if (cached != null) return cached;
-
-        BufferedImage atlas = second ? ModAssets.get().nodes2() : ModAssets.get().nodes();
-        if (atlas == null) return null;
-        int cellW = atlas.getWidth() / NODE_FRAMES;
-        int cellH = atlas.getHeight() / NODE_FRAMES;
-        if (cellW <= 0 || cellH <= 0) return null;
-
-        int cx = cframe * cellW;
-        int cy = strip * cellH;
-        if (cx + cellW > atlas.getWidth() || cy + cellH > atlas.getHeight()) return null;
-
-        int[] cell = new int[cellW * cellH];
-        atlas.getRGB(cx, cy, cellW, cellH, cell, 0, cellW);
-
-        int tr = color >> 16 & 255;
-        int tg = color >> 8 & 255;
-        int tb = color & 255;
-
-        BufferedImage tinted = new BufferedImage(cellW, cellH, BufferedImage.TYPE_INT_ARGB_PRE);
-        int[] tp = ((DataBufferInt) tinted.getRaster().getDataBuffer()).getData();
-        for (int i = 0; i < cell.length; i++) {
-            int p = cell[i];
-            int a = (int) ((p >>> 24) * NODE_ALPHA);
-            if (a == 0) continue;
-            int r = ((p >> 16 & 255) * tr / 255) * a / 255;
-            int gg = ((p >> 8 & 255) * tg / 255) * a / 255;
-            int b = ((p & 255) * tb / 255) * a / 255;
-            tp[i] = a << 24 | r << 16 | gg << 8 | b;
-        }
-
-        BufferedImage out;
-        if (devSize == cellW && devSize == cellH) {
-            out = tinted;
-        } else {
-            out = new BufferedImage(devSize, devSize, BufferedImage.TYPE_INT_ARGB_PRE);
-            Graphics2D gg = out.createGraphics();
-            gg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            gg.drawImage(tinted, 0, 0, devSize, devSize, null);
-            gg.dispose();
-        }
-        NODE_CACHE.put(key, out);
-        return out;
-    }
-
-    /** Качественное уменьшение: последовательное деление пополам, затем билинейно. */
-    private static BufferedImage resize(BufferedImage src, int w, int h) {
-        if (w <= 0 || h <= 0) return null;
-        BufferedImage cur = src;
-        int cw = src.getWidth();
-        int ch = src.getHeight();
-        while (cw / 2 >= w && ch / 2 >= h && cw / 2 > 0 && ch / 2 > 0) {
-            cw /= 2;
-            ch /= 2;
-            BufferedImage next = new BufferedImage(cw, ch, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D gg = next.createGraphics();
-            gg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            gg.drawImage(cur, 0, 0, cw, ch, null);
-            gg.dispose();
-            cur = next;
-        }
-        if (cw == w && ch == h) return cur;
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D gg = out.createGraphics();
-        gg.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                w >= src.getWidth() ? RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR
-                        : RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        gg.drawImage(cur, 0, 0, w, h, null);
-        gg.dispose();
-        return out;
+        Textures.clear();
     }
 }

@@ -1,25 +1,41 @@
 package ru.dw.qeditor.util;
 
+import ru.dw.qeditor.assets.ModAssets;
 import ru.dw.qeditor.model.Defs;
 import ru.dw.qeditor.render.GuiPainter;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.List;
 
 /**
  * Отладочный рендер GuiPainter в PNG — для сверки с игрой.
- * Запуск: java -Dfile.encoding=UTF-8 -cp out ru.dw.qeditor.util.PainterProbe [файл.png]
+ * Запуск: java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.PainterProbe [файл.png]
  */
 public final class PainterProbe {
 
-    public static void main(String[] args) throws Exception {
+    private PainterProbe() { }
+
+    public static void main(String[] args) {
         int guiScale = 2;
         int w = 480, h = 330;
+        File out = new File(args.length > 0 ? args[0] : "painter-probe.png");
 
-        BufferedImage img = new BufferedImage(w * guiScale, h * guiScale, BufferedImage.TYPE_INT_ARGB);
-        GuiPainter p = GuiPainter.forImage(img, guiScale);
+        try (GlProbe probe = GlProbe.open()) {
+            probe.write(out, probe.frame(w * guiScale, h * guiScale, guiScale,
+                    p -> shapes(p, w, h)));
 
+            List<String> tabs = ModAssets.get().knownTabBackgrounds();
+            int cell = 120;
+            int cols = 5;
+            int rows = (tabs.size() + cols - 1) / cols + 1;
+            int bw = cols * cell, bh = rows * cell;
+            File bgFile = new File(out.getParentFile(), "painter-probe-bg.png");
+            probe.write(bgFile, probe.frame(bw * guiScale, bh * guiScale, guiScale,
+                    p -> backgrounds(p, tabs, cell, cols, rows)));
+        }
+    }
+
+    private static void shapes(GuiPainter p, int w, int h) {
         // фон окна мода
         p.guiBackground(0, 0, w, h);
 
@@ -47,12 +63,14 @@ public final class PainterProbe {
 
         // ---- «активный» квест (nodeType = null, серое ядро) и ховер-масштаб
         p.questStar(40, 215, 24, 24, 1f, Defs.Star.GRAY, null, "minecraft:stone", tick);
-        p.questStar(100, 215, 24, 24, 1.25f, Defs.Star.ORANGE, Defs.NodeType.UNSTABLE, "minecraft:blaze_rod", tick);
+        p.questStar(100, 215, 24, 24, 1.25f, Defs.Star.ORANGE, Defs.NodeType.UNSTABLE,
+                "minecraft:blaze_rod", tick);
 
         // ---- размеры иконок
         float x = 170;
         for (Defs.IconSize s : Defs.IconSize.values()) {
-            p.questStar(x, 215, 24, 24, s.scale, Defs.Star.PURPLE, Defs.NodeType.TAINTED, "minecraft:diamond", tick);
+            p.questStar(x, 215, 24, 24, s.scale, Defs.Star.PURPLE, Defs.NodeType.TAINTED,
+                    "minecraft:diamond", tick);
             x += 60;
         }
 
@@ -75,28 +93,12 @@ public final class PainterProbe {
 
         p.text("Забрать награды", 330, panelY + 12, 0xFF55FF55, true);
         p.text("Выполнено задач: 2/5", 330, panelY + 26, 0xFFFFFFFF, true);
-
-        p.dispose();
-
-        File out = new File(args.length > 0 ? args[0] : "painter-probe.png");
-        ImageIO.write(img, "png", out);
-        System.out.println("Записано: " + out.getAbsolutePath() + " (" + img.getWidth() + "x" + img.getHeight() + ")");
-
-        writeBackgrounds(new File(out.getParentFile(), "painter-probe-bg.png"), guiScale);
     }
 
     /** Проверка texturedModalRect: фоны вкладок из jar + слои параллакса Stars. */
-    private static void writeBackgrounds(File file, int guiScale) throws Exception {
-        ru.dw.qeditor.assets.ModAssets a = ru.dw.qeditor.assets.ModAssets.get();
-        java.util.List<String> tabs = a.knownTabBackgrounds();
-        int cell = 120;
-        int cols = 5;
-        int rows = (tabs.size() + cols - 1) / cols + 1;
-        int w = cols * cell, h = rows * cell;
-
-        BufferedImage img = new BufferedImage(w * guiScale, h * guiScale, BufferedImage.TYPE_INT_ARGB);
-        GuiPainter p = GuiPainter.forImage(img, guiScale);
-        p.rect(0, 0, w, h, 0xFF101218);
+    private static void backgrounds(GuiPainter p, List<String> tabs, int cell, int cols, int rows) {
+        ModAssets a = ModAssets.get();
+        p.rect(0, 0, cols * cell, rows * cell, 0xFF101218);
 
         for (int i = 0; i < tabs.size(); i++) {
             String tab = tabs.get(i);
@@ -123,9 +125,5 @@ public final class PainterProbe {
         }
         p.pop();
         p.text("Default + 5 слоёв Stars", 4, by + cell - 10, 0xFFFFFFFF, true);
-
-        p.dispose();
-        ImageIO.write(img, "png", file);
-        System.out.println("Записано: " + file.getAbsolutePath() + " (" + img.getWidth() + "x" + img.getHeight() + ")");
     }
 }

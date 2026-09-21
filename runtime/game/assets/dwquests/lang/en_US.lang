@@ -1,0 +1,9 @@
+# CreativeTab
+itemGroup.DwQuests=Dwarven Quests
+
+# Key Binding
+key.dw_quest=Open quests
+
+# Items
+item.StarAtlas.name=§bStar Atlas
+item.Gift.name=Base Gift

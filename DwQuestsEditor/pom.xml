@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Сборка редактора. Раньше хватало одного javac, но движок отрисовки переехал
+  на LWJGL, а это четыре jar-а плюс нативные библиотеки под каждую систему —
+  проще отдать их Maven, чем держать в репозитории.
+
+  Дерево исходников осталось прежним (src/ru/...), поэтому sourceDirectory
+  переопределён: раскладка Maven по умолчанию потребовала бы переносить все
+  файлы и ломала бы ссылки в PROGRESS.md и .bat-скриптах.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>ru.dw</groupId>
+    <artifactId>dwquests-editor</artifactId>
+    <version>2.0.0</version>
+    <packaging>jar</packaging>
+    <name>DwQuests Editor</name>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <lwjgl.version>3.3.6</lwjgl.version>
+        <main.class>ru.dw.qeditor.Main</main.class>
+    </properties>
+
+    <!-- Нативные библиотеки LWJGL зависят от системы; классификатор выбирается профилем. -->
+    <profiles>
+        <profile>
+            <id>natives-windows</id>
+            <activation><os><family>windows</family></os></activation>
+            <properties><lwjgl.natives>natives-windows</lwjgl.natives></properties>
+        </profile>
+        <profile>
+            <id>natives-linux</id>
+            <activation><os><family>unix</family><name>linux</name></os></activation>
+            <properties><lwjgl.natives>natives-linux</lwjgl.natives></properties>
+        </profile>
+        <profile>
+            <id>natives-macos</id>
+            <activation><os><family>mac</family></os></activation>
+            <properties><lwjgl.natives>natives-macos</lwjgl.natives></properties>
+        </profile>
+    </profiles>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.lwjgl</groupId>
+                <artifactId>lwjgl-bom</artifactId>
+                <version>${lwjgl.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- ядро: работа с нативной памятью -->
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl</artifactId></dependency>
+        <!-- окно, контекст, ввод -->
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-glfw</artifactId></dependency>
+        <!-- собственно OpenGL -->
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-opengl</artifactId></dependency>
+        <!-- stb_image: чтение png без AWT -->
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-stb</artifactId></dependency>
+        <!-- системные диалоги открытия/сохранения файла -->
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-tinyfd</artifactId></dependency>
+
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl</artifactId>
+            <classifier>${lwjgl.natives}</classifier></dependency>
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-glfw</artifactId>
+            <classifier>${lwjgl.natives}</classifier></dependency>
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-opengl</artifactId>
+            <classifier>${lwjgl.natives}</classifier></dependency>
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-stb</artifactId>
+            <classifier>${lwjgl.natives}</classifier></dependency>
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-tinyfd</artifactId>
+            <classifier>${lwjgl.natives}</classifier></dependency>
+    </dependencies>
+
+    <build>
+        <sourceDirectory>src</sourceDirectory>
+        <outputDirectory>out</outputDirectory>
+        <resources>
+            <resource>
+                <directory>src</directory>
+                <includes>
+                    <include>**/*.vert</include>
+                    <include>**/*.frag</include>
+                </includes>
+            </resource>
+        </resources>
+        <plugins>
+            <!-- jar-ы зависимостей рядом со сборкой: run.bat и ручной javac берут их оттуда -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-libs</id>
+                        <phase>process-resources</phase>
+                        <goals><goal>copy-dependencies</goal></goals>
+                        <configuration>
+                            <outputDirectory>lib</outputDirectory>
+                            <overWriteIfNewer>true</overWriteIfNewer>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.1</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>${main.class}</mainClass>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <!-- один самодостаточный jar: нативные библиотеки LWJGL распаковываются из него сами -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.3</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <finalName>DwQuestsEditor</finalName>
+                            <outputDirectory>${project.basedir}</outputDirectory>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>${main.class}</mainClass>
+                                </transformer>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>module-info.class</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

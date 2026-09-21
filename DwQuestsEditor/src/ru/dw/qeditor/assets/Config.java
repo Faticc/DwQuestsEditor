@@ -6,7 +6,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Properties;
 
-/** Пути к ресурсам клиента. Хранятся рядом с программой в dwquests-editor.properties. */
+/**
+ * Пути к ресурсам. Хранятся рядом с программой в dwquests-editor.properties.
+ *
+ * <p>Jar-ов мода редактору больше не нужно: картинки и шрифт вытащены из них
+ * в {@code runtime/game/assets/…} и лежат в самом проекте (а в собранном
+ * дистрибутиве — внутри его jar-а). Пути остались только как способ подложить
+ * свои ресурсы: свежий экспорт иконок или обновлённые текстуры мода.
+ */
 public final class Config {
 
     private static final String FILE_NAME = "dwquests-editor.properties";
@@ -16,10 +23,10 @@ public final class Config {
             System.getProperty("user.home") + "/McSkill/clients/Industrial_1.7.10"
     };
 
+    /** Папка иконок предметов: {@code img/} и {@code json/items.json}. */
     public String iconsDir = "";
-    public String dwQuestsJar = "";
-    public String dwCoreJar = "";
-    public String mcClientJar = "";
+    /** Папка ресурсов мода: внутри {@code assets/dwquests}, {@code assets/dwcore}, {@code assets/minecraft}. */
+    public String gameDir = "";
     public String lastDir = "";
 
     /** Настройки помощника: исполняемый файл Claude Code CLI и модель. */
@@ -51,14 +58,17 @@ public final class Config {
     }
 
     private Config() {
-        File dir;
+        this.file = new File(programDir(), FILE_NAME);
+    }
+
+    /** Каталог, где лежит сама программа (jar или дерево классов). */
+    public static File programDir() {
         try {
             File jar = new File(Config.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-            dir = jar.isFile() ? jar.getParentFile() : jar;
+            return jar.isFile() ? jar.getParentFile() : jar;
         } catch (Exception e) {
-            dir = new File(".");
+            return new File(".");
         }
-        this.file = new File(dir, FILE_NAME);
     }
 
     public File propertiesFile() { return file; }
@@ -71,39 +81,31 @@ public final class Config {
             } catch (IOException ignored) { }
         }
         iconsDir = p.getProperty("iconsDir", "");
-        dwQuestsJar = p.getProperty("dwQuestsJar", "");
-        dwCoreJar = p.getProperty("dwCoreJar", "");
-        mcClientJar = p.getProperty("mcClientJar", "");
+        gameDir = p.getProperty("gameDir", "");
         lastDir = p.getProperty("lastDir", "");
         claudeExe = p.getProperty("claudeExe", "claude");
         claudeModel = p.getProperty("claudeModel", "sonnet");
         watchFile = Boolean.parseBoolean(p.getProperty("watchFile", "true"));
-        try {
-            guiScale = Integer.parseInt(p.getProperty("guiScale", "2"));
-        } catch (NumberFormatException e) {
-            guiScale = 2;
-        }
+        guiScale = intOr(p.getProperty("guiScale"), 2);
         lastFolder = p.getProperty("lastFolder", "");
         backupOnSave = Boolean.parseBoolean(p.getProperty("backupOnSave", "true"));
-        try {
-            backupKeep = Integer.parseInt(p.getProperty("backupKeep", "60"));
-        } catch (NumberFormatException e) {
-            backupKeep = 60;
-        }
-        try {
-            autoBackupMinutes = Integer.parseInt(p.getProperty("autoBackupMinutes", "5"));
-        } catch (NumberFormatException e) {
-            autoBackupMinutes = 5;
-        }
+        backupKeep = intOr(p.getProperty("backupKeep"), 60);
+        autoBackupMinutes = intOr(p.getProperty("autoBackupMinutes"), 5);
         autodetect();
+    }
+
+    private static int intOr(String s, int def) {
+        try {
+            return s == null ? def : Integer.parseInt(s.trim());
+        } catch (NumberFormatException e) {
+            return def;
+        }
     }
 
     public void save() {
         Properties p = new Properties();
         p.setProperty("iconsDir", iconsDir);
-        p.setProperty("dwQuestsJar", dwQuestsJar);
-        p.setProperty("dwCoreJar", dwCoreJar);
-        p.setProperty("mcClientJar", mcClientJar);
+        p.setProperty("gameDir", gameDir);
         p.setProperty("lastDir", lastDir);
         p.setProperty("claudeExe", claudeExe);
         p.setProperty("claudeModel", claudeModel);
@@ -115,83 +117,59 @@ public final class Config {
         p.setProperty("autoBackupMinutes", String.valueOf(autoBackupMinutes));
         try (FileOutputStream out = new FileOutputStream(file)) {
             p.store(new java.io.OutputStreamWriter(out, java.nio.charset.StandardCharsets.UTF_8),
-                    "DwQuests Editor — пути к ресурсам клиента");
+                    "DwQuests Editor — пути к ресурсам");
         } catch (IOException ignored) { }
     }
 
     /**
-     * Ресурсы, положенные рядом с программой в каталоге {@code runtime/}:
-     * иконки предметов и урезанные jar-ы с текстурами и шрифтом. Это позволяет
-     * работать на машине, где клиент Minecraft не установлен.
+     * Каталог {@code runtime} с ресурсами. Ищем рядом с программой и на пару
+     * уровней выше (в репозитории он в корне, а классы — в
+     * {@code DwQuestsEditor/out}).
+     *
+     * <p>Каталог обязан содержать {@code game} или {@code icons}: у собранного
+     * через jpackage приложения рядом лежит своя папка {@code runtime} — это
+     * встроенная Java, и принять её за ресурсы нельзя.
      */
-    private boolean autodetectRuntime() {
-        File dir = runtimeDir();
-        if (dir == null) return false;
-
-        File icons = new File(dir, "icons");
-        File mods = new File(dir, "mods");
-        boolean found = false;
-        if (isBlank(iconsDir) && new File(icons, "json/items.json").isFile()) {
-            iconsDir = icons.getAbsolutePath();
-            found = true;
-        }
-        if (isBlank(dwQuestsJar)) {
-            File f = new File(mods, "DwQuests-assets.jar");
-            if (f.isFile()) { dwQuestsJar = f.getAbsolutePath(); found = true; }
-        }
-        if (isBlank(dwCoreJar)) {
-            File f = new File(mods, "DwCore-assets.jar");
-            if (f.isFile()) { dwCoreJar = f.getAbsolutePath(); found = true; }
-        }
-        if (isBlank(mcClientJar)) {
-            File f = new File(mods, "minecraft-font.jar");
-            if (f.isFile()) { mcClientJar = f.getAbsolutePath(); found = true; }
-        }
-        return found;
-    }
-
-    /** Каталог runtime рядом с программой либо на уровень выше (репозиторий). */
     public File runtimeDir() {
-        File base = file.getParentFile();
-        for (int i = 0; i < 3 && base != null; i++) {
+        File base = programDir();
+        for (int i = 0; i < 4 && base != null; i++) {
             File candidate = new File(base, "runtime");
-            if (candidate.isDirectory()) return candidate;
+            if (looksLikeRuntime(candidate)) return candidate;
             base = base.getParentFile();
         }
         return null;
     }
 
-    /** Заполняет пустые пути: сначала из runtime рядом с программой, потом из клиента. */
-    public void autodetect() {
-        autodetectRuntime();
-        for (String guess : CLIENT_GUESSES) {
-            File client = new File(guess);
-            if (!client.isDirectory()) continue;
-            if (isBlank(iconsDir)) {
-                File icons = new File(client, "icon_exporter");
-                if (new File(icons, "img").isDirectory()) iconsDir = icons.getAbsolutePath();
-            }
-            File mods = new File(client, "mods");
-            if (isBlank(dwQuestsJar)) dwQuestsJar = findJar(mods, "DwQuests");
-            if (isBlank(dwCoreJar)) dwCoreJar = findJar(mods, "DwCore");
-            break;
-        }
-        if (isBlank(mcClientJar)) {
-            File[] candidates = {
-                    new File(System.getProperty("user.home") + "/.gradle/caches/retro_futura_gradle/mc-vanilla/1.7.10/client.jar"),
-                    new File(System.getProperty("user.home") + "/AppData/Roaming/.minecraft/versions/1.7.10/1.7.10.jar")
-            };
-            for (File c : candidates) if (c.isFile()) { mcClientJar = c.getAbsolutePath(); break; }
-        }
+    private static boolean looksLikeRuntime(File dir) {
+        if (dir == null || !dir.isDirectory()) return false;
+        return new File(dir, "game/assets").isDirectory() || new File(dir, "icons/img").isDirectory();
     }
 
-    private static String findJar(File dir, String prefix) {
-        if (!dir.isDirectory()) return "";
-        File[] list = dir.listFiles((d, n) -> n.startsWith(prefix) && n.toLowerCase().endsWith(".jar"));
-        if (list == null || list.length == 0) return "";
-        File best = list[0];
-        for (File f : list) if (f.length() > best.length()) best = f;
-        return best.getAbsolutePath();
+    /**
+     * Заполняет пустые пути: сначала {@code runtime/} рядом с программой,
+     * потом установленный клиент. Если не нашлось ни того, ни другого, пути
+     * останутся пустыми — тогда ресурсы возьмутся из самого jar-а
+     * (см. {@link AssetPack#hasEmbedded()}).
+     */
+    public void autodetect() {
+        File dir = runtimeDir();
+        if (dir != null) {
+            if (isBlank(iconsDir) && new File(dir, "icons/json/items.json").isFile())
+                iconsDir = new File(dir, "icons").getAbsolutePath();
+            if (isBlank(gameDir) && new File(dir, "game/assets").isDirectory())
+                gameDir = new File(dir, "game").getAbsolutePath();
+        }
+        // установленный клиент — последняя надежда: если ресурсы уже вшиты
+        // в программу, угадывать чужие пути незачем
+        if (isBlank(iconsDir) && !AssetPack.hasEmbedded()) {
+            for (String guess : CLIENT_GUESSES) {
+                File icons = new File(new File(guess), "icon_exporter");
+                if (new File(icons, "img").isDirectory()) {
+                    iconsDir = icons.getAbsolutePath();
+                    break;
+                }
+            }
+        }
     }
 
     public static boolean isBlank(String s) { return s == null || s.trim().isEmpty(); }

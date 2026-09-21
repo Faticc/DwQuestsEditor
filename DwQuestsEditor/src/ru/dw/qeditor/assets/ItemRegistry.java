@@ -9,7 +9,6 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -51,6 +50,8 @@ public final class ItemRegistry {
 
     private static ItemRegistry instance;
 
+    /** Откуда читаются items.json и картинки иконок. */
+    private AssetPack pack = AssetPack.empty("не открыто");
     private final Map<String, Entry> byKey = new LinkedHashMap<>();
     private final List<Entry> all = new ArrayList<>();
     private final Set<String> mods = new TreeSet<>();
@@ -71,6 +72,9 @@ public final class ItemRegistry {
 
     public String loadError() { return loadError; }
 
+    /** Откуда загрузились иконки — для диагностики. */
+    public String describe() { return pack.describe(); }
+
     public int size() { return all.size(); }
 
     public List<Entry> entries() { return Collections.unmodifiableList(all); }
@@ -86,14 +90,15 @@ public final class ItemRegistry {
         pathCache.clear();
         fallback = null;
         loadError = null;
+        pack = openPack();
 
-        File json = Config.get().itemsJson();
-        if (json == null || !json.isFile()) {
+        byte[] json = pack.bytes("json/items.json");
+        if (json == null) {
             loadError = "Не найден items.json (укажите папку icon_exporter в настройках)";
             return;
         }
         try {
-            String text = new String(Files.readAllBytes(json.toPath()), StandardCharsets.UTF_8);
+            String text = new String(json, StandardCharsets.UTF_8);
             JsonObject root = JsonParser.parseObject(text);
             for (String key : root.keys()) {
                 JsonObject o = root.obj(key);
@@ -103,9 +108,20 @@ public final class ItemRegistry {
                 all.add(e);
                 mods.add(e.mod);
             }
-        } catch (IOException | RuntimeException e) {
+        } catch (RuntimeException e) {
             loadError = "Ошибка чтения items.json: " + e.getMessage();
         }
+    }
+
+    /**
+     * Папка иконок из настроек — главнее: так можно подсунуть свежий экспорт.
+     * Иначе берём иконки, встроенные в собственный jar.
+     */
+    private AssetPack openPack() {
+        String dir = Config.get().iconsDir;
+        if (!Config.isBlank(dir)) return AssetPack.dir(new File(dir));
+        if (AssetPack.hasEmbedded()) return AssetPack.classpath("icons");
+        return AssetPack.empty("папка иконок не указана");
     }
 
     // ------------------------------------------------------------------ имена
@@ -151,13 +167,7 @@ public final class ItemRegistry {
         if (path == null) return fallbackIcon();
         BufferedImage img = imageCache.get(path);
         if (img != null) return img;
-        File img_dir = Config.get().iconsImgDir();
-        if (img_dir == null) return fallbackIcon();
-        try {
-            img = ImageIO.read(new File(img_dir, path));
-        } catch (IOException e) {
-            img = null;
-        }
+        img = read("img/" + path);
         if (img == null) img = fallbackIcon();
         if (imageCache.size() > 4000) imageCache.clear();
         imageCache.put(path, img);
@@ -209,27 +219,16 @@ public final class ItemRegistry {
         Set<String> names = dirCache.get(dir);
         if (names != null) return names;
         names = new HashSet<>();
-        File img = Config.get().iconsImgDir();
-        if (img != null) {
-            File d = new File(img, dir);
-            String[] list = d.list();
-            if (list != null)
-                for (String n : list)
-                    if (n.toLowerCase(Locale.ROOT).endsWith(".png")) names.add(n.substring(0, n.length() - 4));
-        }
+        String prefix = "img/" + dir + "/";
+        for (String n : pack.list(prefix, ".png"))
+            names.add(n.substring(prefix.length(), n.length() - 4));
         dirCache.put(dir, names);
         return names;
     }
 
     public BufferedImage fallbackIcon() {
         if (fallback != null) return fallback;
-        File img = Config.get().iconsImgDir();
-        if (img != null) {
-            File f = new File(img, "minecraft/bedrock.png");
-            if (f.isFile()) {
-                try { fallback = ImageIO.read(f); } catch (IOException ignored) { }
-            }
-        }
+        fallback = read("img/minecraft/bedrock.png");
         if (fallback == null) {
             fallback = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
             java.awt.Graphics2D g = fallback.createGraphics();
@@ -240,6 +239,16 @@ public final class ItemRegistry {
             g.dispose();
         }
         return fallback;
+    }
+
+    private BufferedImage read(String path) {
+        byte[] data = pack.bytes(path);
+        if (data == null) return null;
+        try {
+            return ImageIO.read(new java.io.ByteArrayInputStream(data));
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     /** Экранирование имени под файловую систему — так делал экспортёр иконок. */
