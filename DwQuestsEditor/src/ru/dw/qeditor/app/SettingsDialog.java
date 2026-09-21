@@ -27,12 +27,13 @@ public final class SettingsDialog extends Dialog {
     private int backupKeep;
     private int autoMinutes;
     private boolean backupOnSave;
+    private boolean reviewBeforeSave;
 
     private SettingsDialog(Runnable onSaved) {
         super("Настройки");
         this.onSaved = onSaved;
         this.width = 760;
-        this.height = 420;
+        this.height = 450;
 
         Config c = Config.get();
         iconsDir = c.iconsDir;
@@ -41,6 +42,7 @@ public final class SettingsDialog extends Dialog {
         backupKeep = c.backupKeep;
         autoMinutes = c.autoBackupMinutes;
         backupOnSave = c.backupOnSave;
+        reviewBeforeSave = c.reviewBeforeSave;
         for (int i = 0; i < MODELS.length; i++)
             if (MODELS[i].equals(c.claudeModel)) modelIndex = i;
     }
@@ -81,6 +83,9 @@ public final class SettingsDialog extends Dialog {
 
         if (ui.checkbox(x + labelW, cy, "Копия при каждом сохранении", backupOnSave))
             backupOnSave = !backupOnSave;
+        cy += 24;
+        if (ui.checkbox(x + labelW, cy, "Показывать изменения перед сохранением", reviewBeforeSave))
+            reviewBeforeSave = !reviewBeforeSave;
 
         int pressed = buttons(ui, x, y + h - row, w, "Отмена", "Сохранить");
         if (pressed == 1) save();
@@ -119,6 +124,7 @@ public final class SettingsDialog extends Dialog {
         c.backupKeep = backupKeep;
         c.autoBackupMinutes = autoMinutes;
         c.backupOnSave = backupOnSave;
+        c.reviewBeforeSave = reviewBeforeSave;
         c.save();
         if (onSaved != null) onSaved.run();
         close();

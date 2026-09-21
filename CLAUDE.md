@@ -196,6 +196,10 @@ DwQuestsBridge\attach.bat     :: впрыск в уже запущенный к�
   текст.
 * Верхние слои (меню, диалог) рисуются последними, но ввод забирают первыми:
   до отрисовки нижних вызывается `ui.blockInput()` / `Popup.blockIfOpen`.
+* Перед сохранением (Ctrl+S) показывается `app/ChangesDialog` — отличия от файла на
+  диске, которые считает `io/TabDiff` (обе стороны через модель, так что отступы и
+  порядок полей не считаются). Выключается галкой или в настройках
+  (`reviewBeforeSave`); внутренние вызовы сохраняют через `saveNow()` без окна.
 * Диалог — верхний слой того же кадра (`app/Dialog`), а не отдельное окно.
   Системные диалоги файла и папки открывает tinyfd (`app/FileDialogs`).
 * Координаты интерфейса — логические точки: масштаб экрана учитывает
@@ -304,6 +308,9 @@ java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.PreviewProbe .
 java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.UiProbe ui.png вкладка.json 0
 java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.UiProbe ui.png вкладка.json 1 1920 1080 full
 ```
+
+С `-Ddwq.probe.changes=другая.json` `UiProbe` подменяет содержимое вкладки и снимает
+окно несохранённых изменений.
 
 `UiProbe` рисует настоящее окно редактора (`App.drawFrame`), так что им сверяется
 весь интерфейс, а не только карта.

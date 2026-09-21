@@ -21,7 +21,7 @@ public final class UiProbe {
 
     private UiProbe() { }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         String out = args.length > 0 ? args[0] : "ui-probe.png";
         String tabFile = args.length > 1 ? args[1] : null;
         int pageIndex = args.length > 2 ? Integer.parseInt(args[2]) : 0;
@@ -39,6 +39,9 @@ public final class UiProbe {
             if (chromeless) app.setChromeVisible(false);
             if (scroll) for (int i = 0; i < 5; i++) app.scrollPreviewTabs();
             app.selectSidebarPage(sidebarPage);
+            // -Ddwq.probe.changes=другая.json — окно изменений: будто вкладку отредактировали до неё
+            String changes = System.getProperty("dwq.probe.changes");
+            if (changes != null) app.probeChanges(new File(changes));
 
             BufferedImage img = probe.frameSelf(app::drawFrame);
             if (img.getWidth() != width || img.getHeight() != height)

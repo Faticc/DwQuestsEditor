@@ -12,6 +12,7 @@ import ru.dw.qeditor.gui.Ui;
 import ru.dw.qeditor.gui.Widgets;
 import ru.dw.qeditor.io.Backups;
 import ru.dw.qeditor.io.IdAudit;
+import ru.dw.qeditor.io.TabDiff;
 import ru.dw.qeditor.io.TabIO;
 import ru.dw.qeditor.io.Workspace;
 import ru.dw.qeditor.json.JsonObject;
@@ -385,8 +386,19 @@ public final class App {
             mx += mw;
         }
 
-        ui.textIn(model.isDirty() ? "есть несохранённые правки" : "", x + w - 230, y, 220,
-                Theme.MENU_BAR, Theme.WARNING, Ui.RIGHT, Theme.FONT_SMALL, false);
+        if (model.isDirty()) {
+            String mark = "есть несохранённые правки";
+            float mw = ui.textWidth(mark, Theme.FONT_SMALL, false);
+            boolean hovered = ui.over(x + w - 10 - mw, y, mw, Theme.MENU_BAR);
+            ui.textIn(mark, x + w - 230, y, 220, Theme.MENU_BAR,
+                    hovered ? Theme.shade(Theme.WARNING, 1.2f) : Theme.WARNING,
+                    Ui.RIGHT, Theme.FONT_SMALL, false);
+            if (hovered) {
+                ui.cursor(GlWindow.CURSOR_HAND);
+                ui.tooltip("Показать, что изменится в файле");
+                if (ui.in().leftPressed()) showChanges();
+            }
+        }
     }
 
     private void buildMenu(int index, float x, float y) {
@@ -399,6 +411,7 @@ public final class App {
                 item(items, actions, "Открыть папку…", null, this::openFolder);
                 item(items, actions, "Сохранить", "Ctrl+S", this::save);
                 item(items, actions, "Сохранить как…", null, this::saveAs);
+                item(items, actions, "Несохранённые изменения…", null, this::showChanges);
                 separator(items, actions);
                 item(items, actions, "Вставить вкладку из буфера", null, this::pasteTab);
                 item(items, actions, "Копировать вкладку в буфер", null, this::copyTab);
@@ -763,7 +776,57 @@ public final class App {
         }));
     }
 
+    /**
+     * Сохранить по команде человека: сначала показать, что изменится в файле,
+     * если это включено. Внутренним вызовам (вопрос «Сохранить?») нужен
+     * {@link #saveNow()} — окно там уже было.
+     */
     private void save() {
+        if (model.file() == null || !Config.get().reviewBeforeSave) {
+            saveNow();
+            return;
+        }
+        TabDiff diff;
+        try {
+            diff = changes();
+        } catch (Exception e) {
+            // файл на диске не читается — сравнивать не с чем, а сохранить его и надо
+            saveNow();
+            return;
+        }
+        if (diff.isEmpty()) {
+            saveNow();
+            return;
+        }
+        open(new ChangesDialog(model.file().getName(), diff, this::saveNow, null));
+    }
+
+    /** Чем открытая вкладка отличается от своего файла на диске. */
+    private TabDiff changes() throws Exception {
+        File f = model.file();
+        QuestTab old = f != null && f.isFile() ? TabIO.load(f) : null;
+        return TabDiff.compare(old, model.tab());
+    }
+
+    private void showChanges() {
+        showChanges(this::saveNow, null);
+    }
+
+    /**
+     * @param onSave  кнопка «Сохранить» (есть, только пока правки не сохранены)
+     * @param onClose окно закрыли, ничего не сохранив
+     */
+    private void showChanges(Runnable onSave, Runnable onClose) {
+        try {
+            String name = model.file() == null ? "Вкладка ещё не сохранена в файл" : model.file().getName();
+            open(new ChangesDialog(name, changes(), model.isDirty() ? onSave : null, onClose));
+        } catch (Exception e) {
+            error("Не удалось прочитать файл вкладки", e);
+            if (onClose != null) onClose.run();
+        }
+    }
+
+    private void saveNow() {
         if (model.file() == null) {
             saveAs();
             return;
@@ -1174,12 +1237,19 @@ public final class App {
         open(Dialogs.confirm("DwQuests Editor",
                 "Есть несохранённые изменения. Сохранить?\n"
                         + "Если нет — состояние всё равно попадёт в историю версий.",
-                new String[]{"Отмена", "Не сохранять", "Сохранить"}, answer -> {
-                    if (answer == 2) {
-                        save();
+                new String[]{"Отмена", "Изменения", "Не сохранять", "Сохранить"}, answer -> {
+                    if (answer == 3) {
+                        saveNow();
                         if (!model.isDirty()) next.run();
                         else if (onCancel != null) onCancel.run();
                     } else if (answer == 1) {
+                        // посмотрели — и снова тот же вопрос
+                        showChanges(() -> {
+                            saveNow();
+                            if (!model.isDirty()) next.run();
+                            else if (onCancel != null) onCancel.run();
+                        }, () -> confirmDiscard(reason, next, onCancel));
+                    } else if (answer == 2) {
                         backup(reason);
                         next.run();
                     } else if (onCancel != null) {
@@ -1228,6 +1298,12 @@ public final class App {
     }
 
     /** Открыть файл из кода — запуск с аргументом и отладочные проверки. */
+    /** Для UiProbe: подменить содержимое, не трогая файл, и показать отличия. */
+    public void probeChanges(File edited) throws Exception {
+        model.setTab(TabIO.load(edited), model.file(), true);
+        showChanges();
+    }
+
     public void openFile(File f) {
         try {
             model.setTab(TabIO.load(f), f, false);

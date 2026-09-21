@@ -42,6 +42,8 @@ public final class Config {
     public int backupKeep = 60;
     /** Делать копию при каждом сохранении. */
     public boolean backupOnSave = true;
+    /** Перед сохранением показать, что изменится в файле. */
+    public boolean reviewBeforeSave = true;
     /** Период автоматической копии при несохранённых правках, минут (0 — выключено). */
     public int autoBackupMinutes = 5;
 
@@ -97,6 +99,7 @@ public final class Config {
         guiScale = intOr(p.getProperty("guiScale"), 2);
         lastFolder = p.getProperty("lastFolder", "");
         backupOnSave = Boolean.parseBoolean(p.getProperty("backupOnSave", "true"));
+        reviewBeforeSave = Boolean.parseBoolean(p.getProperty("reviewBeforeSave", "true"));
         backupKeep = intOr(p.getProperty("backupKeep"), 60);
         autoBackupMinutes = intOr(p.getProperty("autoBackupMinutes"), 5);
         clientDir = p.getProperty("clientDir", "");
@@ -126,6 +129,7 @@ public final class Config {
         p.setProperty("lastFolder", lastFolder);
         p.setProperty("backupKeep", String.valueOf(backupKeep));
         p.setProperty("backupOnSave", String.valueOf(backupOnSave));
+        p.setProperty("reviewBeforeSave", String.valueOf(reviewBeforeSave));
         p.setProperty("autoBackupMinutes", String.valueOf(autoBackupMinutes));
         p.setProperty("clientDir", clientDir);
         p.setProperty("linkPort", String.valueOf(linkPort));
