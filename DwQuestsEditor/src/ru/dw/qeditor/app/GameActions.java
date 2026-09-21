@@ -321,8 +321,55 @@ final class GameActions {
         if (tabID == null) return;
         confirmThen("Выполнить всю вкладку",
                 "Все квесты вкладки '" + tabID + "' станут выполненными у игрока " + GameLink.get().player() + ".",
-                "Выполнить", () -> run("Выполнить вкладку " + tabID,
-                        () -> "/dwq complete tab " + arg(tabID) + " " + me(), reward));
+                "Выполнить", () -> async((reward ? "Выполнить и забрать вкладку " : "Выполнить вкладку ") + tabID, () -> {
+                    JsonObject r = GameLink.get().command("/dwq complete tab " + arg(tabID) + " " + me());
+                    return reward ? merge(r, claimSafely(tabID, List.of())) : r;
+                }));
+    }
+
+    /**
+     * Выделенные квесты: команды по одной, а награды потом разом. По очереди,
+     * потому что награду можно просить, только когда клиент узнал о выполнении,
+     * а мост после каждой команды как раз ждёт ответа сервера.
+     */
+    void completeQuests(List<String> questIDs, boolean reward) {
+        String tabID = currentTab();
+        if (tabID == null || questIDs.isEmpty()) return;
+        String title = (reward ? "Выполнить и забрать: " : "Выполнить: ") + label(questIDs);
+        async(title, () -> {
+            JsonObject r = new JsonObject().put("done", "").put("replies", new JsonArray());
+            for (String questID : questIDs) {
+                r = merge(r, GameLink.get().command(
+                        "/dwq complete_quest " + arg(tabID) + " " + arg(questID) + " False " + me()));
+            }
+            return reward ? merge(r, claimSafely(tabID, questIDs)) : r;
+        });
+    }
+
+    void claimQuests(List<String> questIDs) {
+        String tabID = currentTab();
+        if (tabID == null || questIDs.isEmpty()) return;
+        async("Забрать награды: " + label(questIDs), () -> GameLink.get().claimMany(tabID, questIDs));
+    }
+
+    /** Награды за все выполненные квесты открытой вкладки — не трогая другие вкладки. */
+    void claimTab() {
+        String tabID = currentTab();
+        if (tabID == null) return;
+        async("Забрать награды вкладки " + tabID, () -> GameLink.get().claimMany(tabID, List.of()));
+    }
+
+    /** Нет наград — не ошибка всего действия: выполнение уже прошло. */
+    private static JsonObject claimSafely(String tabID, List<String> questIDs) {
+        try {
+            return GameLink.get().claimMany(tabID, questIDs);
+        } catch (Exception e) {
+            return new JsonObject().put("done", "награды: " + e.getMessage());
+        }
+    }
+
+    private static String label(List<String> questIDs) {
+        return questIDs.size() == 1 ? questIDs.get(0) : questIDs.size() + " квестов";
     }
 
     void completeAll(boolean reward) {
@@ -435,8 +482,8 @@ final class GameActions {
             JsonArray arr = o.arr("replies");
             if (arr != null) for (int i = 0; i < arr.size(); i++) replies.add(arr.str(i));
         }
-        return new JsonObject().put("done", a.str("done", "") + "\n" + b.str("done", ""))
-                .put("replies", replies);
+        String done = (a.str("done", "") + "\n" + b.str("done", "")).trim();
+        return new JsonObject().put("done", done).put("replies", replies);
     }
 
     /** Ответы, дошедшие из потока моста, — их показывает кадр. */

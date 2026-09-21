@@ -104,6 +104,54 @@ public final class QuestProgress {
         return "награда за " + questID + " запрошена";
     }
 
+    /**
+     * «Забрать награду» у нескольких квестов вкладки разом; пустой список —
+     * все выполненные квесты вкладки с незабранной наградой. Место в инвентаре
+     * считается на всех: как только его не хватает, остальные не просим.
+     */
+    public static String claimMany(String tabID, List<String> questIDs) {
+        EntityPlayer player = Minecraft.getMinecraft().thePlayer;
+        if (player == null) throw new IllegalStateException("игрок не в мире");
+        QuestTab tab = Quests.tab(tabID);
+        if (tab == null) throw new IllegalArgumentException("в игре нет вкладки '" + tabID + "'");
+        List<Quest> quests = new ArrayList<Quest>();
+        if (questIDs.isEmpty()) {
+            quests.addAll(tab.getQuests());
+        } else {
+            for (String id : questIDs) {
+                Quest q = tab.getQuestByID(id);
+                if (q != null) quests.add(q);
+            }
+        }
+        int free = freeSlots(player);
+        int sent = 0, notDone = 0, noRoom = 0;
+        for (Quest quest : quests) {
+            QuestData data = questData(tabID, quest.getQuestID());
+            if (data == null || !data.isCompleted()) {
+                notDone++;
+                continue;
+            }
+            if (data.isRewarded()) continue;
+            int need = quest.getRewardStacks().size();
+            if (need > free) {
+                noRoom++;
+                continue;
+            }
+            if (sent == 0) startCapture();
+            NetworkHandler.sendToServer(new SPQuestButtons(SPQuestButtons.Type.GET_REWARD, tabID, quest.getQuestID()));
+            data.setRewarded(true);
+            free -= need;
+            sent++;
+        }
+        if (sent == 0 && noRoom == 0) {
+            throw new IllegalStateException(questIDs.size() == 1 && notDone == 1
+                    ? "квест ещё не выполнен" : "незабранных наград нет");
+        }
+        return "запрошено наград: " + sent
+                + (noRoom > 0 ? ", не хватило места ещё на " + noRoom : "")
+                + (notDone > 0 && !questIDs.isEmpty() ? ", не выполнено: " + notDone : "");
+    }
+
     /** Кнопка «Забрать все награды». */
     public static String claimAll() {
         player();

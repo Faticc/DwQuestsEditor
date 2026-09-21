@@ -84,11 +84,22 @@ final class Api {
                 public String call() { return QuestProgress.command(text); }
             });
         } else if (path.equals("/claim")) {
+            // один квест — ?quest=, несколько — телом по строке, без них — вся вкладка
             final String tab = query.get("tab"), quest = query.get("quest");
-            if (tab == null || quest == null) throw new IllegalArgumentException("нужны параметры tab и quest");
-            progressAction(ex, new Callable<String>() {
-                public String call() { return QuestProgress.claim(tab, quest); }
-            });
+            if (tab == null) throw new IllegalArgumentException("нужен параметр tab");
+            if (quest != null) {
+                progressAction(ex, new Callable<String>() {
+                    public String call() { return QuestProgress.claim(tab, quest); }
+                });
+            } else {
+                final List<String> ids = new ArrayList<String>();
+                if (body != null) {
+                    for (String line : body.split("\n")) if (!line.trim().isEmpty()) ids.add(line.trim());
+                }
+                progressAction(ex, new Callable<String>() {
+                    public String call() { return QuestProgress.claimMany(tab, ids); }
+                });
+            }
         } else if (path.equals("/claim-all")) {
             progressAction(ex, new Callable<String>() {
                 public String call() { return QuestProgress.claimAll(); }

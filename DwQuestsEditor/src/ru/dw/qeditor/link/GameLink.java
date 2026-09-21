@@ -344,6 +344,11 @@ public final class GameLink {
         return JsonParser.parseObject(post0("/claim", "tab=" + enc(tabID) + "&quest=" + enc(questID), ""));
     }
 
+    /** «Забрать награду» у нескольких квестов вкладки; пустой список — у всех выполненных в ней. */
+    public JsonObject claimMany(String tabID, List<String> questIDs) throws IOException {
+        return JsonParser.parseObject(post0("/claim", "tab=" + enc(tabID), String.join("\n", questIDs)));
+    }
+
     /** Кнопка книги квестов «Забрать все награды». */
     public JsonObject claimAll() throws IOException {
         return JsonParser.parseObject(post0("/claim-all", null, ""));

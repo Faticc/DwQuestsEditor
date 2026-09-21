@@ -323,10 +323,50 @@ public final class App {
                 Theme.TEXT_DISABLED, Ui.LEFT, Theme.FONT_SMALL, false);
 
         return by - y + bh + 8;
+        bx += 94;
+
+        if (GameLink.get().connected()) by = drawProgressButtons(x, w, bx, by, bh);
     }
 
     private float drawPreviewToolbar(float x, float y, float w) {
         float bh = Theme.ROW;
+    /**
+     * Прогресс своего игрока в запущенной игре — рядом с зумом, чтобы выполнить
+     * или забрать выделенное, не уходя в меню. С Shift «Выполнить» ещё и
+     * забирает награду. Возвращает строку, на которой кончились кнопки.
+     */
+    private float drawProgressButtons(float x, float w, float bx, float by, float bh) {
+        if (bx + 460 > x + w) {
+            bx = x;
+            by += bh + 4;
+        }
+        String me = GameLink.get().player();
+        String hint = "В игре у " + (me.isEmpty() ? "своего игрока" : me)
+                + ": команда /dwq от вашего имени, права проверит сервер. Shift — сразу забрать награду";
+        List<String> selected = new ArrayList<>(model.selection());
+        boolean shift = ui.in().shift();
+
+        ui.textIn(selected.size() > 1 ? "квесты (" + selected.size() + ")" : "квест",
+                bx, by, 70, bh, Theme.TEXT_MUTED, Ui.LEFT, Theme.FONT_SMALL, false);
+        bx += 72;
+        if (ui.button(bx, by, 84, bh, "Выполнить", Ui.NORMAL, !selected.isEmpty()))
+            game.completeQuests(selected, shift);
+        if (ui.over(bx, by, 84, bh)) ui.tooltip(hint);
+        bx += 88;
+        if (ui.button(bx, by, 70, bh, "Забрать", Ui.NORMAL, !selected.isEmpty())) game.claimQuests(selected);
+        if (ui.over(bx, by, 70, bh)) ui.tooltip("Забрать награду в игре — как кнопкой в книге квестов");
+        bx += 82;
+
+        ui.textIn("вкладка", bx, by, 56, bh, Theme.TEXT_MUTED, Ui.LEFT, Theme.FONT_SMALL, false);
+        bx += 58;
+        if (ui.button(bx, by, 84, bh, "Выполнить", Ui.NORMAL, true)) game.completeTab(shift);
+        if (ui.over(bx, by, 84, bh)) ui.tooltip(hint);
+        bx += 88;
+        if (ui.button(bx, by, 70, bh, "Забрать", Ui.NORMAL, true)) game.claimTab();
+        if (ui.over(bx, by, 70, bh)) ui.tooltip("Забрать награды за все выполненные квесты этой вкладки");
+        return by;
+    }
+
         float bx = x;
         ui.textIn("прогресс", bx, y, 60, bh, Theme.TEXT_MUTED, Ui.LEFT, Theme.FONT_SMALL, false);
         bx += 62;
@@ -528,6 +568,7 @@ public final class App {
             item(items, actions, "Выполнить активные и забрать награды", null, () -> game.completeActive(true));
             item(items, actions, "Выполнить всю эту вкладку…", null, () -> game.completeTab(false));
             item(items, actions, "Выполнить все квесты…", null, () -> game.completeAll(false));
+            item(items, actions, "Забрать награды этой вкладки", null, game::claimTab);
             item(items, actions, "Забрать все награды", null, game::claimAll);
             item(items, actions, "Сбросить прогресс этой вкладки…", null, game::clearTab);
             item(items, actions, "Сбросить весь прогресс…", null, game::clearAll);
