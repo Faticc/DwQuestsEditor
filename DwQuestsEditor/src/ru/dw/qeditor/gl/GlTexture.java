@@ -18,6 +18,27 @@ import static org.lwjgl.opengl.GL33C.*;
  */
 public final class GlTexture {
 
+    /** Чем фильтровать текстуру. */
+    public enum Filter {
+        /** GL_NEAREST в обе стороны — «пиксельный» вид, как в игре. */
+        PIXEL,
+        /** Билинейная с уровнями уменьшения — иконки, ноды, фон. */
+        SMOOTH,
+        /**
+         * Увеличение пиксельное, уменьшение билинейное.
+         *
+         * <p>Для шрифта мода: глиф кириллицы в {@code unicode_page_xx.png}
+         * занимает 16 пикселей, а рисуется восемью (FontRenderer.renderUnicodeChar),
+         * то есть при масштабе 1 экранный пиксель на пиксель шрифта он вдвое
+         * уменьшается. GL_NEAREST при этом просто выбрасывает каждый второй
+         * ряд текселей — от букв остаются огрызки. GL_LINEAR на уменьшении
+         * усредняет пару текселей, и текст снова читается; на увеличении
+         * (масштаб 2 и выше) фильтр меняется на GL_NEAREST, поэтому крупный
+         * шрифт остаётся резким.
+         */
+        GLYPH
+    }
+
     private final int id;
     private final int width;
     private final int height;
@@ -44,16 +65,31 @@ public final class GlTexture {
      * @param repeat  true — GL_REPEAT (на этом держится параллакс фона карты)
      */
     public static GlTexture of(BufferedImage img, boolean smooth, boolean repeat) {
+        return of(img, smooth ? Filter.SMOOTH : Filter.PIXEL, repeat);
+    }
+
+    /**
+     * @param filter  чем фильтровать, см. {@link Filter}
+     * @param repeat  true — GL_REPEAT (на этом держится параллакс фона карты)
+     */
+    public static GlTexture of(BufferedImage img, Filter filter, boolean repeat) {
         int w = img.getWidth();
         int h = img.getHeight();
+        boolean smooth = filter == Filter.SMOOTH;
+        int min = switch (filter) {
+            case SMOOTH -> GL_LINEAR_MIPMAP_LINEAR;
+            case GLYPH -> GL_LINEAR;
+            case PIXEL -> GL_NEAREST;
+        };
+        int mag = smooth ? GL_LINEAR : GL_NEAREST;
         ByteBuffer buf = toRgba(img);
         try {
             int id = glGenTextures();
             glBindTexture(GL_TEXTURE_2D, id);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, smooth ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, smooth ? GL_LINEAR : GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag);
             int wrap = repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE;
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
@@ -62,6 +98,14 @@ public final class GlTexture {
         } finally {
             MemoryUtil.memFree(buf);
         }
+    }
+
+    /**
+     * Обёртка над уже созданной текстурой — так рисуют содержимым кадрового
+     * буфера. Владение не передаётся: {@link #dispose} тут звать не надо.
+     */
+    public static GlTexture wrap(int id, int width, int height) {
+        return new GlTexture(id, width, height);
     }
 
     /** Пустая текстура под атлас — заполняется кусками через {@link #upload}. */

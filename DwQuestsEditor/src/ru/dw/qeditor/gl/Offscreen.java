@@ -8,9 +8,10 @@ import java.nio.ByteBuffer;
 import static org.lwjgl.opengl.GL33C.*;
 
 /**
- * Кадровый буфер в текстуру — им пользуются проверки отрисовки: окно при этом
- * можно держать скрытым, а результат сохранять в PNG и сравнивать глазами.
- * Раньше ту же роль играли картинки Java2D, в которые рисовал редактор.
+ * Кадровый буфер в текстуру. Им пользуются проверки отрисовки — окно при этом
+ * можно держать скрытым, а результат сохранять в PNG и сравнивать глазами, —
+ * и предпросмотр описания: он рисуется крупно и резко, а на экран кладётся
+ * уменьшенной картинкой.
  */
 public final class Offscreen {
 
@@ -18,20 +19,38 @@ public final class Offscreen {
     private final int color;
     private final int width;
     private final int height;
+    private final boolean mipmaps;
+    private final GlTexture handle;
 
-    private Offscreen(int fbo, int color, int width, int height) {
+    private Offscreen(int fbo, int color, int width, int height, boolean mipmaps) {
         this.fbo = fbo;
         this.color = color;
         this.width = width;
         this.height = height;
+        this.mipmaps = mipmaps;
+        this.handle = GlTexture.wrap(color, width, height);
     }
 
     public static Offscreen create(int width, int height) {
+        return create(width, height, false);
+    }
+
+    /**
+     * @param mipmaps держать уровни уменьшения. Нужны, если картинку потом
+     *                уменьшают больше чем вдвое: линейная фильтрация берёт
+     *                четыре текселя из скольких угодно, и без уровней
+     *                уменьшенная картинка рябит.
+     */
+    public static Offscreen create(int width, int height, boolean mipmaps) {
         int tex = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, tex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, (ByteBuffer) null);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if (mipmaps) glGenerateMipmap(GL_TEXTURE_2D);
 
         int fbo = glGenFramebuffers();
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -40,12 +59,24 @@ public final class Offscreen {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         if (status != GL_FRAMEBUFFER_COMPLETE)
             throw new IllegalStateException("Кадровый буфер не собрался: " + status);
-        return new Offscreen(fbo, tex, width, height);
+        return new Offscreen(fbo, tex, width, height, mipmaps);
     }
 
     public int width() { return width; }
 
     public int height() { return height; }
+
+    public int fbo() { return fbo; }
+
+    /** Нарисованное — как текстура. Владение остаётся за буфером. */
+    public GlTexture texture() { return handle; }
+
+    /** Пересчитать уровни уменьшения — после того, как в буфер нарисовали. */
+    public void buildMipmaps() {
+        if (!mipmaps) return;
+        glBindTexture(GL_TEXTURE_2D, color);
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
 
     public void bind(int clearColor) {
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -57,6 +88,13 @@ public final class Offscreen {
     }
 
     public void unbind() { glBindFramebuffer(GL_FRAMEBUFFER, 0); }
+
+    /** Залить цветом уже выбранный буфер — им пользуется {@link Batch#pushTarget}. */
+    public static void clear(int argb) {
+        glClearColor((argb >> 16 & 255) / 255f, (argb >> 8 & 255) / 255f,
+                (argb & 255) / 255f, (argb >>> 24) / 255f);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
 
     /** Забрать картинку обратно в память — только для проверок, это медленно. */
     public BufferedImage read() {

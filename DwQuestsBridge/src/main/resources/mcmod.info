@@ -1,0 +1,16 @@
+[
+{
+  "modid": "dwqbridge",
+  "name": "DwQuests Bridge",
+  "description": "Выгрузка иконок предметов (с учётом NBT), ресурсов мода и вкладок квестов из клиента; мост с редактором DwQuestsEditor.",
+  "version": "${modVersion}",
+  "mcversion": "${minecraftVersion}",
+  "url": "",
+  "updateUrl": "",
+  "authorList": ["Faticc"],
+  "credits": "",
+  "logoFile": "",
+  "screenshots": [],
+  "dependencies": []
+}
+]

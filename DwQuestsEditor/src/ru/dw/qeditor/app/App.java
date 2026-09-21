@@ -17,6 +17,7 @@ import ru.dw.qeditor.io.Workspace;
 import ru.dw.qeditor.json.JsonObject;
 import ru.dw.qeditor.json.JsonParser;
 import ru.dw.qeditor.json.JsonWriter;
+import ru.dw.qeditor.link.GameLink;
 import ru.dw.qeditor.model.Parent;
 import ru.dw.qeditor.model.Quest;
 import ru.dw.qeditor.model.QuestTab;
@@ -69,6 +70,10 @@ public final class App {
     private final Popup popup = new Popup();
 
     private final EditorModel model = new EditorModel();
+
+    EditorModel model() { return model; }
+
+    private final GameActions game = new GameActions(this);
     private final Workspace workspace = new Workspace();
     private final ProjectView project = new ProjectView(workspace);
     private final MapView map = new MapView(model);
@@ -128,6 +133,7 @@ public final class App {
         updateTitle();
         checkAssets();
         restoreLastFolder();
+        game.autoConnect();
     }
 
     // ------------------------------------------------------------------ цикл
@@ -360,7 +366,7 @@ public final class App {
         }
         if (!popup.isOpen(menuId)) openMenu = -1;
 
-        String[] titles = {"Файл", "Правка", "Вид", "Инструменты", "Справка"};
+        String[] titles = {"Файл", "Правка", "Вид", "Инструменты", "Игра", "Справка"};
         float mx = x + 8;
         for (int i = 0; i < titles.length; i++) {
             float mw = ui.textWidth(titles[i]) + 22;
@@ -451,6 +457,7 @@ public final class App {
                 item(items, actions, "Помощник Claude", null, () -> page = 3);
                 item(items, actions, "Страница JSON", null, () -> page = 2);
             }
+            case 4 -> buildGameMenu(items, actions);
             default -> {
                 item(items, actions, "Горячие клавиши", null, this::showHelp);
                 item(items, actions, "О программе", null, this::showAbout);
@@ -458,6 +465,48 @@ public final class App {
         }
         menuActions = actions;
         popup.open(menuId, x, y, items, 240);
+    }
+
+    /**
+     * Меню «Игра» — всё через мост с запущенным клиентом (мод DwQuestsBridge).
+     * Пока связи нет, в меню только «подключиться»: остальное без игры бессмысленно.
+     */
+    private void buildGameMenu(List<Popup.Item> items, List<Runnable> actions) {
+        boolean connected = GameLink.get().connected();
+        if (connected) {
+            item(items, actions, "Обновить связь", null, () -> {
+                game.forgetTabs();
+                game.connect();
+            });
+            item(items, actions, "Отключиться", null, game::disconnect);
+        } else {
+            item(items, actions, "Подключиться к игре", null, game::connect);
+        }
+        item(items, actions, "Состояние связи…", null, game::showStatus);
+        separator(items, actions);
+
+        if (connected) {
+            for (String tabID : game.cachedTabNames()) {
+                if (tabID == null || tabID.isEmpty()) continue;
+                final String id = tabID;
+                item(items, actions, "Открыть: " + id, null, () -> game.openTab(id));
+            }
+            item(items, actions, "Забрать все вкладки…", null, game::fetchAll);
+            separator(items, actions);
+            item(items, actions, "Отправить эту вкладку в игру…", null, () -> game.sendCurrent(false));
+            item(items, actions, "Положить эту вкладку в буфер игры", null, () -> game.sendCurrent(true));
+            item(items, actions, "Отправить все вкладки папки в игру…", null, game::sendAll);
+            separator(items, actions);
+            item(items, actions, "В игре: выгрузить все иконки", null, () -> game.export("icons", "all"));
+            item(items, actions, "В игре: выгрузить иконки вкладок", null, () -> game.export("icons", "quests"));
+            item(items, actions, "Забрать выгруженные иконки", null, game::pullIcons);
+            item(items, actions, "В игре: выгрузить текстуры и шрифт", null, () -> game.export("assets", null));
+            item(items, actions, "В игре: выгрузить вкладки в файлы", null, () -> game.export("tabs", null));
+            item(items, actions, "Забрать выгруженные вкладки в папку", null, game::pullTabs);
+            separator(items, actions);
+        }
+        check(items, actions, "Дорисовывать иконки из игры",
+                Config.get().linkAutoIcons, game::toggleAutoIcons);
     }
 
     private void item(List<Popup.Item> items, List<Runnable> actions, String label,
@@ -517,6 +566,7 @@ public final class App {
     // ------------------------------------------------------------------ фоновые задачи
 
     private void tick() {
+        game.tick();
         double now = ui.time();
         if (Config.get().watchFile && now - lastWatch > 1.5) {
             lastWatch = now;
@@ -549,6 +599,19 @@ public final class App {
             return;
         }
         reloadSilently(f);
+    }
+
+    /** Открытая слева папка вкладок или null. */
+    Workspace workspace() {
+        return workspace.isOpen() ? workspace : null;
+    }
+
+    /** Вкладки в папке переписаны снаружи (из игры): обновить список и открытый файл. */
+    void folderChanged() {
+        workspace.rescan();
+        project.refresh();
+        feedPreviewTabs();
+        watchFile();
     }
 
     private void reloadSilently(File f) {
@@ -1076,16 +1139,16 @@ public final class App {
         if (dialog != null) dialogs.push(dialog);
     }
 
-    private void showText(String title, String text) {
+    void showText(String title, String text) {
         open(Dialogs.text(title, text, () -> window.setClipboard(text)));
     }
 
-    private void error(String message, Exception e) {
+    void error(String message, Exception e) {
         open(Dialogs.message("Ошибка", message + ":\n" + e.getMessage()));
         status(message + ": " + e.getMessage());
     }
 
-    private void status(String text) {
+    void status(String text) {
         status = text;
     }
 

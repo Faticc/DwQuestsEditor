@@ -1,0 +1,28 @@
+plugins {
+    id("com.gtnewhorizons.gtnhconvention")
+}
+
+// Воркспейс лежит в репозитории редактора, а jar-ы пака -- в клиенте.
+// Путь задаётся свойством clientDir (gradle.properties), переопределяется
+// ключом -PclientDir=... -- чтобы собрать на другой машине.
+def client = project.findProperty("clientDir") ?: "C:/Users/User/McSkill/clients/Industrial_1.7.10"
+
+dependencies {
+    // Классы квестов клиента: ClientQuestManager, QuestTab, Quest, IQuestTask.
+    // Боевой jar не обфусцирован (проверено javap), поэтому по нему же и компилируем --
+    // имена методов в рантайме те же.
+    compileOnly files("$client/mods/DwQuests-1.2-client-final.jar")
+    // ForgeNameUtils (строка предмета <-> ItemStack), Rarity, NodeType.
+    compileOnly files("$client/mods/DwCore-1.2-client-final.jar")
+    // NEI -- необязательный источник предметов с NBT (ItemList). Обращение к нему
+    // изолировано в NeiStacks и включается только если мод загружен.
+    compileOnly files("$client/mods/NotEnoughItems-2.7.59-GTNH-patched.jar")
+}
+
+tasks.named("compileJava") {
+    options.compilerArgs << "-Xmaxerrs" << "1000"
+}
+
+// Версию по умолчанию плагин берёт из git describe -- получается
+// "dwqbridge-860617d-main+...-dirty.jar". Моду в mods/ нужно постоянное имя.
+version = "1.0"

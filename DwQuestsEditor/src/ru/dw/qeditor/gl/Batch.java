@@ -4,6 +4,8 @@ import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 import java.nio.ShortBuffer;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 import static org.lwjgl.opengl.GL33C.*;
 
@@ -283,6 +285,46 @@ public final class Batch {
         if (!scissorOn) return;
         flush();
         scissorOn = false;
+    }
+
+    // ------------------------------------------------------------------ свой приёмник
+
+    /** Что было до {@link #pushTarget}: буфер, размер кадра и отсечение. */
+    private final Deque<int[]> targets = new ArrayDeque<>();
+
+    /**
+     * Перенаправить вывод в свой кадровый буфер. Незаконченный пакет сначала
+     * уходит туда, куда рисовали до сих пор, — иначе вершины, посчитанные для
+     * прежнего размера кадра, оказались бы в чужом буфере.
+     *
+     * <p>Отсечение снимается: у приёмника своя система координат.
+     */
+    public void pushTarget(int fbo, int width, int height) {
+        flush();
+        targets.push(new int[]{glGetInteger(GL_FRAMEBUFFER_BINDING), viewportW, viewportH,
+                scissorOn ? 1 : 0, scX, scY, scW, scH});
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        viewportW = Math.max(1, width);
+        viewportH = Math.max(1, height);
+        glViewport(0, 0, viewportW, viewportH);
+        scissorOn = false;
+        glDisable(GL_SCISSOR_TEST);
+    }
+
+    /** Вернуть вывод прежнему приёмнику вместе с его отсечением. */
+    public void popTarget() {
+        flush();
+        int[] t = targets.pop();
+        glBindFramebuffer(GL_FRAMEBUFFER, t[0]);
+        viewportW = t[1];
+        viewportH = t[2];
+        glViewport(0, 0, viewportW, viewportH);
+        scissorOn = t[3] != 0;
+        scX = t[4];
+        scY = t[5];
+        scW = t[6];
+        scH = t[7];
+        applyState();
     }
 
     // ------------------------------------------------------------------ примитивы

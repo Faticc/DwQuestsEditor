@@ -32,22 +32,25 @@ public final class Textures {
     private Textures() { }
 
     /** «Пиксельная» текстура: как GL_NEAREST в игре. */
-    public static GlTexture pixel(BufferedImage img) { return get(img, false, false); }
+    public static GlTexture pixel(BufferedImage img) { return get(img, GlTexture.Filter.PIXEL, false); }
 
     /** Сглаженная текстура с уровнями уменьшения. */
-    public static GlTexture smooth(BufferedImage img) { return get(img, true, false); }
+    public static GlTexture smooth(BufferedImage img) { return get(img, GlTexture.Filter.SMOOTH, false); }
+
+    /** Страница шрифта мода: резкая при увеличении, усреднённая при уменьшении. */
+    public static GlTexture glyph(BufferedImage img) { return get(img, GlTexture.Filter.GLYPH, false); }
 
     /** Повторяющаяся «пиксельная» текстура — на ней держится параллакс фона карты. */
-    public static GlTexture pixelRepeating(BufferedImage img) { return get(img, false, true); }
+    public static GlTexture pixelRepeating(BufferedImage img) { return get(img, GlTexture.Filter.PIXEL, true); }
 
     /** Повторяющаяся сглаженная текстура. */
-    public static GlTexture repeating(BufferedImage img) { return get(img, true, true); }
+    public static GlTexture repeating(BufferedImage img) { return get(img, GlTexture.Filter.SMOOTH, true); }
 
-    private static GlTexture get(BufferedImage img, boolean smooth, boolean repeat) {
+    private static GlTexture get(BufferedImage img, GlTexture.Filter filter, boolean repeat) {
         if (img == null) return null;
-        GlTexture[] slot = CACHE.computeIfAbsent(img, i -> new GlTexture[4]);
-        int idx = (smooth ? 2 : 0) | (repeat ? 1 : 0);
-        if (slot[idx] == null) slot[idx] = GlTexture.of(img, smooth, repeat);
+        GlTexture[] slot = CACHE.computeIfAbsent(img, i -> new GlTexture[6]);
+        int idx = filter.ordinal() * 2 + (repeat ? 1 : 0);
+        if (slot[idx] == null) slot[idx] = GlTexture.of(img, filter, repeat);
         return slot[idx];
     }
 

@@ -82,7 +82,6 @@ public final class Sidebar {
     private int rewardRow = -1;
     private int parentRow = -1;
     private String hint = " ";
-    private static Task taskClipboard;
 
     public Sidebar(EditorModel model, Popup popup, Consumer<Dialog> openDialog) {
         this.model = model;
@@ -408,10 +407,18 @@ public final class Sidebar {
         bx = x;
         if (ui.button(bx, by, 88, bh, "Предмет…", Ui.NORMAL, taskRow >= 0)) pickTaskItem(q, ids);
         bx += 92;
-        if (ui.button(bx, by, 88, bh, "Копировать", Ui.NORMAL, taskRow >= 0)) copyTask(q, ids);
-        bx += 92;
-        if (ui.button(bx, by, 78, bh, "Вставить", Ui.NORMAL, q != null && taskClipboard != null))
-            pasteTask(q);
+        if (ui.button(bx, by, 100, bh, "Копировать", Ui.NORMAL, taskRow >= 0)) copyTask(ui, q, ids);
+        if (ui.over(bx, by, 100, bh)) ui.tooltip("Выбранную задачу — в буфер обмена");
+        bx += 104;
+        if (ui.button(bx, by, 44, bh, "Все", Ui.NORMAL, q != null && !q.tasks.isEmpty())) {
+            QuestParts.copyTasks(ui.window(), q.tasks);
+            hint("Скопировано задач: " + q.tasks.size());
+        }
+        if (ui.over(bx, by, 44, bh)) ui.tooltip("Все задачи квеста — в буфер обмена");
+        bx += 48;
+        if (ui.button(bx, by, 80, bh, "Вставить", Ui.NORMAL, !model.selection().isEmpty()))
+            pasteParts(ui, "tasks");
+        if (ui.over(bx, by, 80, bh)) ui.tooltip("В конец задач всех выделенных квестов");
 
         float ty = by + bh + 8;
         float tableH = Math.max(60, y + h - ty);
@@ -606,15 +613,47 @@ public final class Sidebar {
                 s -> model.edit("Предмет задачи", () -> t.forgeName = s)));
     }
 
-    private void copyTask(Quest q, List<Integer> ids) {
+    private void copyTask(Ui ui, Quest q, List<Integer> ids) {
         if (q == null || taskRow < 0 || taskRow >= ids.size()) return;
-        taskClipboard = q.tasks.get(ids.get(taskRow)).copy();
+        int id = ids.get(taskRow);
+        Map<Integer, Task> one = new LinkedHashMap<>();
+        one.put(id, q.tasks.get(id));
+        QuestParts.copyTasks(ui.window(), one);
         hint("Задача скопирована");
     }
 
-    private void pasteTask(Quest q) {
-        if (q == null || taskClipboard == null) return;
-        model.edit("Вставка задачи", () -> q.tasks.put(q.nextTaskID(), taskClipboard.copy()));
+    /**
+     * Вставить задачи, награды или зависимости из буфера во все выделенные
+     * квесты — одной правкой, чтобы отменялось одним Ctrl+Z.
+     */
+    private void pasteParts(Ui ui, String what) {
+        List<Quest> targets = new ArrayList<>();
+        for (String id : model.selection()) {
+            Quest q = model.tab().quests.get(id);
+            if (q != null) targets.add(q);
+        }
+        if (targets.isEmpty()) return;
+        String noun = switch (what) {
+            case "tasks" -> "задач";
+            case "rewards" -> "наград";
+            default -> "зависимостей";
+        };
+        if (!QuestParts.has(ui.window(), what)) {
+            hint("В буфере нет " + noun + " — сначала «Копировать»");
+            return;
+        }
+        int[] total = {0};
+        model.edit("Вставка " + noun, () -> {
+            for (Quest q : targets) {
+                total[0] += switch (what) {
+                    case "tasks" -> QuestParts.pasteTasks(ui.window(), q);
+                    case "rewards" -> QuestParts.pasteRewards(ui.window(), q);
+                    default -> QuestParts.pasteParents(ui.window(), q);
+                };
+            }
+        });
+        hint("Вставлено " + noun + ": " + total[0]
+                + (targets.size() > 1 ? " в " + targets.size() + " квестов" : ""));
     }
 
     private void renumberTasks(Quest q) {
@@ -679,6 +718,21 @@ public final class Sidebar {
         bx = rewardButton(ui, "↑", bx, by, 26, bh, rewardRow > 0, () -> moveReward(q, -1));
         rewardButton(ui, "↓", bx, by, 26, bh, rewardRow >= 0 && rewardRow < rewards.size() - 1,
                 () -> moveReward(q, 1));
+
+        by += bh + 4;
+        bx = x;
+        bx = rewardButton(ui, "Копировать", bx, by, 100, bh, rewardRow >= 0, () -> {
+            QuestParts.copyRewards(ui.window(), List.of(rewards.get(rewardRow)));
+            hint("Награда скопирована");
+        });
+        bx = rewardButton(ui, "Все", bx, by, 44, bh, !rewards.isEmpty(), () -> {
+            QuestParts.copyRewards(ui.window(), rewards);
+            hint("Скопировано наград: " + rewards.size());
+        });
+        if (ui.over(bx - 48, by, 44, bh)) ui.tooltip("Все награды квеста — в буфер обмена");
+        rewardButton(ui, "Вставить", bx, by, 80, bh, !model.selection().isEmpty(),
+                () -> pasteParts(ui, "rewards"));
+        if (ui.over(bx, by, 80, bh)) ui.tooltip("В конец наград всех выделенных квестов");
 
         float ly = by + bh + 8;
         drawRewardList(ui, q, rewards, x, ly, w, Math.max(60, y + h - ly));
@@ -822,6 +876,14 @@ public final class Sidebar {
             model.edit("Удаление зависимости", () -> q.parents.remove(i));
             parentRow = Math.min(i, q.parents.size() - 1);
         }
+        if (ui.button(x + 168, y, 100, bh, "Копировать", Ui.NORMAL, !parents.isEmpty())) {
+            QuestParts.copyParents(ui.window(), parents);
+            hint("Скопировано зависимостей: " + parents.size());
+        }
+        if (ui.over(x + 168, y, 100, bh)) ui.tooltip("Все зависимости квеста — в буфер обмена");
+        if (ui.button(x + 272, y, 80, bh, "Вставить", Ui.NORMAL, !model.selection().isEmpty()))
+            pasteParts(ui, "parents");
+        if (ui.over(x + 272, y, 80, bh)) ui.tooltip("Во все выделенные квесты, без повторов");
 
         float ty = y + bh + 8;
         float tableH = Math.max(60, y + h - ty);

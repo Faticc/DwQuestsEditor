@@ -1,0 +1,9 @@
+.gradle/
+build/
+run/
+.idea/
+*.hprof
+*.iml
+layout.json
+attach/out/
+attach/*.jar

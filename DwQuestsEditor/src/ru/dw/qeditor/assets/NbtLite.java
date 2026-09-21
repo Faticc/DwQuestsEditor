@@ -286,6 +286,69 @@ public final class NbtLite {
         return d.string("Lore");
     }
 
+    // -------------------------------------------------------- приведённый вид
+
+    /**
+     * Приведённый вид NBT: ключи отсортированы, типовые суффиксы чисел убраны,
+     * лишнего нет. Нужен, чтобы одну и ту же вещь, записанную по-разному,
+     * считать одной вещью — по нему ищется иконка варианта с NBT.
+     *
+     * <p>Ровно то же самое считает мод-выгрузчик ({@code Names.canonical} в
+     * DwQuestsBridge): имя файла иконки — хеш от этой строки. Отсюда и мелочи
+     * вроде строк без экранирования: в 1.7.10 {@code NBTTagString.toString()}
+     * кавычки внутри не экранирует, и повторять надо именно это.
+     */
+    public static String canonical(String nbt) {
+        if (nbt == null || nbt.trim().isEmpty()) return "";
+        Compound c = parse(nbt);
+        if (c == null) return "";
+        StringBuilder sb = new StringBuilder();
+        canonical(sb, c);
+        return sb.toString();
+    }
+
+    private static void canonical(StringBuilder sb, Object v) {
+        if (v == null) { sb.append("\"\""); return; }
+        if (v instanceof Compound) {
+            Compound c = (Compound) v;
+            java.util.List<String> keys = new ArrayList<>(c.keySet());
+            java.util.Collections.sort(keys);
+            sb.append('{');
+            for (int i = 0; i < keys.size(); i++) {
+                if (i > 0) sb.append(',');
+                sb.append(keys.get(i)).append(':');
+                canonical(sb, c.get(keys.get(i)));
+            }
+            sb.append('}');
+            return;
+        }
+        if (v instanceof ListTag) {
+            ListTag l = (ListTag) v;
+            sb.append('[');
+            for (int i = 0; i < l.size(); i++) {
+                if (i > 0) sb.append(',');
+                canonical(sb, l.get(i));
+            }
+            sb.append(']');
+            return;
+        }
+        if (v instanceof Num) { sb.append(canonicalNumber(((Num) v).text)); return; }
+        sb.append('"').append(v).append('"');
+    }
+
+    /** "12" → "12", "1.0" → "1", "0.50" → "0.5". */
+    static String canonicalNumber(String raw) {
+        String s = raw == null ? "" : raw.trim();
+        if (s.isEmpty()) return s;
+        try {
+            double d = Double.parseDouble(s);
+            if (d == Math.rint(d) && !Double.isInfinite(d) && Math.abs(d) < 1e15) return String.valueOf((long) d);
+            return String.valueOf(d);
+        } catch (NumberFormatException e) {
+            return s;
+        }
+    }
+
     /** Гифт по умолчанию — как его создаёт редактор при выборе типа награды «Гифт». */
     public static Compound newGift() {
         Compound c = new Compound();

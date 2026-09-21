@@ -36,16 +36,26 @@ public final class ItemRegistry {
         public final String name;
         public final String itemId;
         public final String mod;
+        /** Имя файла картинки, если по ключу его не вывести (вариант с NBT). */
+        public final String icon;
         final String search;
 
         Entry(String key, String name, String itemId) {
+            this(key, name, itemId, null);
+        }
+
+        Entry(String key, String name, String itemId, String icon) {
             this.key = key;
             this.name = name == null ? "" : name;
             this.itemId = itemId == null ? "" : itemId;
+            this.icon = icon;
             int c = key.indexOf(':');
             this.mod = c > 0 ? key.substring(0, c) : key;
             this.search = (this.name + " " + key + " " + this.itemId).toLowerCase(Locale.ROOT);
         }
+
+        /** Вариант, который отличается от обычного предмета только NBT. */
+        public boolean hasNbt() { return key.indexOf('{') > 0; }
     }
 
     private static ItemRegistry instance;
@@ -53,6 +63,8 @@ public final class ItemRegistry {
     /** Откуда читаются items.json и картинки иконок. */
     private AssetPack pack = AssetPack.empty("не открыто");
     private final Map<String, Entry> byKey = new LinkedHashMap<>();
+    /** "mod:name:meta|приведённый NBT" -> путь картинки внутри img/. */
+    private final Map<String, String> iconByNbt = new HashMap<>();
     private final List<Entry> all = new ArrayList<>();
     private final Set<String> mods = new TreeSet<>();
     /** mod-каталог -> список имён png в нём (без расширения). */
@@ -83,6 +95,7 @@ public final class ItemRegistry {
 
     public void reload() {
         byKey.clear();
+        iconByNbt.clear();
         all.clear();
         mods.clear();
         dirCache.clear();
@@ -103,10 +116,17 @@ public final class ItemRegistry {
             for (String key : root.keys()) {
                 JsonObject o = root.obj(key);
                 if (o == null) continue;
-                Entry e = new Entry(key, o.str("itemName", key), o.str("itemId", ""));
+                String icon = o.str("icon", null);
+                Entry e = new Entry(key, o.str("itemName", key), o.str("itemId", ""), icon);
                 byKey.put(key, e);
                 all.add(e);
                 mods.add(e.mod);
+                if (icon != null && e.hasNbt()) {
+                    // у варианта с NBT ключ — целиком строка предмета; чтобы он
+                    // нашёлся и по иначе записанному NBT, помним приведённый вид
+                    ForgeName fn = ForgeName.parse(key);
+                    iconByNbt.put(fn.id + "|" + NbtLite.canonical(fn.nbt), icon);
+                }
             }
         } catch (RuntimeException e) {
             loadError = "Ошибка чтения items.json: " + e.getMessage();
@@ -161,9 +181,27 @@ public final class ItemRegistry {
 
     // ---------------------------------------------------------------- иконки
 
+    /**
+     * Откуда брать иконки, которых в выгрузке нет. Подставляется мостом с игрой
+     * ({@code link.IconFetcher}): живой клиент умеет нарисовать что угодно, в том
+     * числе вариант предмета с NBT. Возвращает null, если картинки пока нет —
+     * тогда рисуется то, что есть, а кадром позже появится настоящая.
+     */
+    public interface Extra {
+        BufferedImage icon(String forgeString, boolean haveRough);
+    }
+
+    private static Extra extra;
+
+    public static void setExtra(Extra source) { extra = source; }
+
     /** Иконка предмета 64x64 (или заглушка, если не найдена). */
     public BufferedImage icon(String forgeString) {
         String path = iconPath(forgeString);
+        if (extra != null && (path == null || roughNbtMatch(forgeString, path))) {
+            BufferedImage fromGame = extra.icon(forgeString, path != null);
+            if (fromGame != null) return fromGame;
+        }
         if (path == null) return fallbackIcon();
         BufferedImage img = imageCache.get(path);
         if (img != null) return img;
@@ -189,6 +227,23 @@ public final class ItemRegistry {
             String dir = esc(fn.mod);
             String base = esc(fn.name);
             Set<String> names = dirNames(dir);
+            // Вариант с NBT: у него своя картинка с хвостом ~хеш. Сначала
+            // указатель из items.json, потом просто файл с таким именем.
+            if (fn.nbt != null) {
+                String byIndex = iconByNbt.get(fn.id + "|" + NbtLite.canonical(fn.nbt));
+                if (byIndex == null) {
+                    Entry exact = byKey.get(fn.id + fn.nbt);
+                    if (exact != null && exact.icon != null) byIndex = exact.icon;
+                }
+                if (byIndex == null) {
+                    String guess = iconFileFor(forgeString);
+                    if (guess != null && pack.has("img/" + guess)) byIndex = guess;
+                }
+                if (byIndex != null) {
+                    pathCache.put(forgeString, byIndex);
+                    return byIndex;
+                }
+            }
             if (!names.isEmpty()) {
                 String meta = (fn.metaRaw != null && !fn.metaRaw.equals("*")) ? fn.metaRaw : null;
                 if (meta != null && names.contains(base + "_" + meta)) result = dir + "/" + base + "_" + meta + ".png";
@@ -249,6 +304,52 @@ public final class ItemRegistry {
         } catch (IOException e) {
             return null;
         }
+    }
+
+    /** Нашлась только общая картинка предмета, а NBT у него есть — вид может отличаться. */
+    private static boolean roughNbtMatch(String forgeString, String path) {
+        return path != null && path.indexOf('~') < 0 && forgeString.indexOf('{') > 0;
+    }
+
+    /**
+     * Имя файла иконки для строки предмета: {@code <мод>/<имя>[_мета][~хеш].png}.
+     * Ровно так его считает мод-выгрузчик (DwQuestsBridge, {@code Names.iconPath}),
+     * поэтому редактор находит выгруженный вариант с NBT, ничего не спрашивая.
+     */
+    public static String iconFileFor(String forgeString) {
+        ForgeName fn = ForgeName.parse(forgeString);
+        if (fn.isCommand() || fn.mod.isEmpty() || fn.name.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder();
+        sb.append(esc(fn.mod)).append('/').append(esc(fn.name));
+        int meta = fn.metaRaw == null ? 0 : fn.meta;
+        if (meta > 0 && meta != 32767) sb.append('_').append(meta);
+        if (fn.nbt != null) sb.append('~').append(hash8(NbtLite.canonical(fn.nbt)));
+        return sb.append(".png").toString();
+    }
+
+    /** Первые 8 знаков SHA-1 — так же, как в моде-выгрузчике. */
+    public static String hash8(String canonical) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-1");
+            byte[] d = md.digest(canonical.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 4; i++) {
+                sb.append(Character.forDigit((d[i] >> 4) & 0xF, 16));
+                sb.append(Character.forDigit(d[i] & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(canonical.hashCode());
+        }
+    }
+
+    /** Иконка появилась на диске уже после загрузки — учесть её в поиске. */
+    public void noticeNewIcon(String path) {
+        int slash = path.indexOf('/');
+        if (slash <= 0) return;
+        Set<String> names = dirCache.get(path.substring(0, slash));
+        if (names != null) names.add(path.substring(slash + 1, path.length() - 4));
+        pathCache.clear();
     }
 
     /** Экранирование имени под файловую систему — так делал экспортёр иконок. */

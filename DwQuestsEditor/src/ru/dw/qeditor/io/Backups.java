@@ -38,6 +38,7 @@ public final class Backups {
         BEFORE_LAYOUT("перед раскладкой сеткой"),
         BEFORE_RELOAD("перед перечитыванием файла"),
         BEFORE_RESTORE("перед восстановлением версии"),
+        BEFORE_GAME("перед заменой вкладкой из игры"),
         MANUAL("вручную");
 
         public final String ru;

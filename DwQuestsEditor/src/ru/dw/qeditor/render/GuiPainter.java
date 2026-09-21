@@ -427,6 +427,19 @@ public final class GuiPainter implements McFont.Sink {
         drawTexture(t, x, y, width, height, u1, v1, u2, v2, 0xFFFFFFFF);
     }
 
+    /**
+     * Содержимое своего кадрового буфера на экран: размер задаётся сразу в
+     * пикселях экрана, начало прижимается к целому пикселю — иначе уменьшенная
+     * картинка размазывается ещё раз. По вертикали координаты текстуры идут
+     * наоборот: у GL начало координат внизу.
+     */
+    public void textureSnapped(GlTexture tex, float x, float y, int deviceWidth, int deviceHeight) {
+        if (tex == null || deviceWidth <= 0 || deviceHeight <= 0) return;
+        batch.texture(tex);
+        batch.sprite(Math.round(dx(x)), Math.round(dy(y)), deviceWidth, deviceHeight,
+                0, 1, 1, 0, 0xFFFFFFFF);
+    }
+
     private void drawTexture(GlTexture tex, float x, float y, float width, float height,
                              float u1, float v1, float u2, float v2, int tint) {
         if (tex == null || width <= 0 || height <= 0) return;
@@ -602,7 +615,10 @@ public final class GuiPainter implements McFont.Sink {
     @Override
     public void glyph(BufferedImage page, float gx, float gy, float gw, float gh,
                       int sx, int sy, int sw, int sh, boolean italic, int color) {
-        GlTexture tex = Textures.pixel(page);
+        // страница шрифта, а не обычная «пиксельная» текстура: кириллица
+        // приходит из unicode_page вдвое крупнее, чем рисуется, и на мелком
+        // масштабе GL_NEAREST выкусывает из букв половину рядов
+        GlTexture tex = Textures.glyph(page);
         if (tex == null) return;
         float u1 = sx / (float) tex.width();
         float v1 = sy / (float) tex.height();

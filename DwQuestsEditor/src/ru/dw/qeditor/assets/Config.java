@@ -45,6 +45,14 @@ public final class Config {
     /** Период автоматической копии при несохранённых правках, минут (0 — выключено). */
     public int autoBackupMinutes = 5;
 
+    /** Папка клиента Minecraft — в ней мод-мост оставляет dwq_export/bridge.json. */
+    public String clientDir = "";
+    /** Порт и ключ моста вручную; пустые — берутся из bridge.json. */
+    public int linkPort = 0;
+    public String linkToken = "";
+    /** Просить игру дорисовать иконку, которой нет в выгрузке (варианты с NBT). */
+    public boolean linkAutoIcons = true;
+
     private final File file;
 
     private static Config instance;
@@ -91,6 +99,10 @@ public final class Config {
         backupOnSave = Boolean.parseBoolean(p.getProperty("backupOnSave", "true"));
         backupKeep = intOr(p.getProperty("backupKeep"), 60);
         autoBackupMinutes = intOr(p.getProperty("autoBackupMinutes"), 5);
+        clientDir = p.getProperty("clientDir", "");
+        linkPort = intOr(p.getProperty("linkPort"), 0);
+        linkToken = p.getProperty("linkToken", "");
+        linkAutoIcons = Boolean.parseBoolean(p.getProperty("linkAutoIcons", "true"));
         autodetect();
     }
 
@@ -115,6 +127,10 @@ public final class Config {
         p.setProperty("backupKeep", String.valueOf(backupKeep));
         p.setProperty("backupOnSave", String.valueOf(backupOnSave));
         p.setProperty("autoBackupMinutes", String.valueOf(autoBackupMinutes));
+        p.setProperty("clientDir", clientDir);
+        p.setProperty("linkPort", String.valueOf(linkPort));
+        p.setProperty("linkToken", linkToken);
+        p.setProperty("linkAutoIcons", String.valueOf(linkAutoIcons));
         try (FileOutputStream out = new FileOutputStream(file)) {
             p.store(new java.io.OutputStreamWriter(out, java.nio.charset.StandardCharsets.UTF_8),
                     "DwQuests Editor — пути к ресурсам");
@@ -159,6 +175,14 @@ public final class Config {
             if (isBlank(gameDir) && new File(dir, "game/assets").isDirectory())
                 gameDir = new File(dir, "game").getAbsolutePath();
         }
+        if (isBlank(clientDir)) {
+            for (String guess : CLIENT_GUESSES) {
+                if (new File(new File(guess), "mods").isDirectory()) {
+                    clientDir = guess;
+                    break;
+                }
+            }
+        }
         // установленный клиент — последняя надежда: если ресурсы уже вшиты
         // в программу, угадывать чужие пути незачем
         if (isBlank(iconsDir) && !AssetPack.hasEmbedded()) {
@@ -177,4 +201,14 @@ public final class Config {
     public File iconsImgDir() { return isBlank(iconsDir) ? null : new File(iconsDir, "img"); }
 
     public File itemsJson() { return isBlank(iconsDir) ? null : new File(new File(iconsDir, "json"), "items.json"); }
+
+    /**
+     * Куда класть иконки, дорисованные игрой. Если папка иконок задана — прямо
+     * в неё, чтобы в следующий раз они нашлись сами; иначе рядом с программой
+     * (ресурсы могут быть вшиты в jar, писать внутрь него некуда).
+     */
+    public File iconsWriteDir() {
+        if (!isBlank(iconsDir)) return new File(iconsDir);
+        return new File(programDir(), "icons");
+    }
 }

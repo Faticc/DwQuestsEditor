@@ -2,9 +2,12 @@ package ru.dw.qeditor.cli;
 
 import ru.dw.qeditor.assets.ItemRegistry;
 import ru.dw.qeditor.io.TabIO;
+import ru.dw.qeditor.json.JsonArray;
 import ru.dw.qeditor.json.JsonObject;
 import ru.dw.qeditor.json.JsonParser;
 import ru.dw.qeditor.json.JsonWriter;
+import ru.dw.qeditor.assets.Config;
+import ru.dw.qeditor.link.GameLink;
 import ru.dw.qeditor.model.Defs;
 import ru.dw.qeditor.model.Parent;
 import ru.dw.qeditor.model.Quest;
@@ -85,6 +88,14 @@ public final class QuestCli {
             case "backup":     return backup(a);
             case "restore":    return restore(a);
             case "tabs":       return tabs(a);
+            case "link":       return link(a);
+            case "link-tabs":  return linkTabs(a);
+            case "link-get":   return linkGet(a);
+            case "link-all":   return linkAll(a);
+            case "link-paste": return linkPaste(a);
+            case "link-icon":  return linkIcon(a);
+            case "link-export": return linkExport(a);
+            case "link-icons-pull": return linkIconsPull(a);
             default:
                 throw new UsageException("неизвестная команда «" + cmd + "», см. help");
         }
@@ -228,6 +239,174 @@ public final class QuestCli {
         }
         out.println("Вкладок: " + ws.entries().size() + ", квестов всего: " + ws.totalQuests());
         return 0;
+    }
+
+    // ------------------------------------------------------------- связь с игрой
+
+    /**
+     * Команды {@code link-*} работают с запущенным клиентом через мод
+     * DwQuestsBridge: он поднимает мост на 127.0.0.1 и оставляет порт с ключом
+     * в {@code <клиент>/dwq_export/bridge.json}, так что настраивать обычно
+     * нечего — достаточно, чтобы игра была запущена.
+     */
+    private static GameLink link() {
+        GameLink link = GameLink.get();
+        if (!link.connected() && !link.connect()) throw new UsageException(link.status());
+        return link;
+    }
+
+    private static int link(Args a) {
+        GameLink link = GameLink.get();
+        link.connect();
+        out.println(link.status());
+        out.println("адрес: " + (link.baseUrl().isEmpty() ? "не найден" : link.baseUrl()));
+        if (!link.connected()) return 1;
+        try {
+            JsonObject job = link.jobStatus();
+            out.println("в игре: " + (job.bool("busy", false)
+                    ? job.str("job", "работа") + " — " + Math.round(job.f("fraction", 0) * 100) + "%"
+                    : "ничего не выгружается"));
+        } catch (Exception e) {
+            out.println("состояние выгрузки: " + e.getMessage());
+        }
+        return 0;
+    }
+
+    private static int linkTabs(Args a) throws Exception {
+        JsonArray arr = link().tabs().arr("tabs");
+        if (arr == null || arr.size() == 0) {
+            out.println("В игре нет вкладок");
+            return 0;
+        }
+        out.printf("%-28s %7s %6s  %s%n", "tabID", "квестов", "sort", "иконка");
+        int total = 0;
+        for (int i = 0; i < arr.size(); i++) {
+            JsonObject o = arr.obj(i);
+            if (o == null) continue;
+            total += o.i("quests", 0);
+            out.printf("%-28s %7d %6d  %s%n", cut(o.str("tabID", ""), 28),
+                    o.i("quests", 0), o.i("sortIndex", 0), o.str("iconItem", ""));
+        }
+        out.println("Вкладок: " + arr.size() + ", квестов всего: " + total);
+        return 0;
+    }
+
+    private static int linkGet(Args a) throws Exception {
+        String tabID = a.positional(0, "tabID вкладки в игре");
+        String json = link().tab(tabID);
+        String outPath = a.str("out", null);
+        if (outPath == null) {
+            out.println(json);
+            return 0;
+        }
+        File file = new File(outPath);
+        writeText(file, json);
+        out.println("Вкладка «" + tabID + "» → " + file.getAbsolutePath() + " (" + json.length() + " симв.)");
+        return 0;
+    }
+
+    private static int linkAll(Args a) throws Exception {
+        File dir = new File(a.positional(0, "папка для вкладок"));
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new UsageException("не создаётся папка " + dir);
+        GameLink link = link();
+        JsonArray arr = link.tabs().arr("tabs");
+        int ok = 0;
+        int failed = 0;
+        for (int i = 0; arr != null && i < arr.size(); i++) {
+            JsonObject o = arr.obj(i);
+            if (o == null) continue;
+            String tabID = o.str("tabID", "");
+            try {
+                String json = link.tab(tabID);
+                File file = new File(dir, tabID + ".json");
+                writeText(file, json);
+                out.println("  " + file.getName() + " — " + json.length() + " симв.");
+                ok++;
+            } catch (Exception e) {
+                out.println("  " + tabID + " — не вышло: " + e.getMessage());
+                failed++;
+            }
+        }
+        out.println("Забрано вкладок: " + ok + (failed > 0 ? ", не вышло: " + failed : ""));
+        out.println("Это сборка из памяти клиента: без broadcast и с пересобранным порядком наград.");
+        out.println("Точная копия файлов — в самой игре: /dwqb tabs raw (нужны права на /dwq).");
+        return 0;
+    }
+
+    private static int linkPaste(Args a) throws Exception {
+        File file = a.file();
+        if (!file.isFile()) throw new UsageException("файл не найден: " + file.getAbsolutePath());
+        QuestTab tab = TabIO.load(file);
+        String tabID = a.str("tab", tab.tabID);
+        String json = tab.toJsonString();
+        GameLink link = link();
+        if (a.flag("clipboard")) {
+            link.toClipboard(tabID, json);
+            out.println("Вкладка в буфере игры; в игре осталось сказать /dwq tab paste "
+                    + tabID.replace(' ', '_'));
+            return 0;
+        }
+        out.println(link.paste(tabID, json));
+        out.println("Отправлено: «" + tabID + "», " + tab.quests.size() + " квестов, "
+                + json.length() + " симв.");
+        out.println("Команду выполняет сам клиент, и сервер проверяет права на /dwq.");
+        return 0;
+    }
+
+    private static int linkIcon(Args a) throws Exception {
+        String stack = a.positional(0, "строка предмета");
+        byte[] png = link().icon(stack);
+        String outPath = a.str("out", null);
+        File file = outPath != null ? new File(outPath)
+                : new File(ItemRegistry.esc(stack.replaceAll("[{].*", "")) + ".png");
+        try (java.io.FileOutputStream os = new java.io.FileOutputStream(file)) {
+            os.write(png);
+        }
+        out.println("Иконка → " + file.getAbsolutePath() + " (" + png.length + " байт)");
+        return 0;
+    }
+
+    private static int linkExport(Args a) throws Exception {
+        String what = a.positional(0, "что выгружать: icons | assets | tabs");
+        out.println(link().export(what, a.str("scope", null)));
+        out.println("Выгрузка идёт в самой игре; ход виден в её чате, файлы — в <клиент>/dwq_export.");
+        return 0;
+    }
+
+    /**
+     * Выгрузка игры лежит у клиента, а редактор читает свою папку иконок —
+     * переносим. С --wait сначала дожидаемся, пока игра закончит выгрузку.
+     */
+    private static int linkIconsPull(Args a) throws Exception {
+        GameLink link = GameLink.get();
+        link.connect();
+        if (a.flag("wait") && link.connected()) {
+            JsonObject job;
+            while ((job = link.jobStatus()).bool("busy", false)) {
+                out.println("в игре: " + job.str("job", "работа") + " — "
+                        + Math.round(job.f("fraction", 0) * 100) + "%");
+                Thread.sleep(3000);
+            }
+        }
+        String clientDir = !link.clientDir().isEmpty() ? link.clientDir() : Config.get().clientDir;
+        File from = ru.dw.qeditor.link.IconImport.source(clientDir);
+        if (from == null) throw new UsageException("выгруженных иконок нет: "
+                + (Config.isBlank(clientDir) ? "клиент не найден" : clientDir + "/dwq_export/icons"));
+        File to = Config.get().iconsWriteDir();
+        out.println(from.getAbsolutePath() + " → " + to.getAbsolutePath());
+        out.println(ru.dw.qeditor.link.IconImport.run(from, to));
+        return 0;
+    }
+
+    private static void writeText(File file, String text) throws Exception {
+        File parent = file.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new UsageException("не создаётся папка " + parent);
+        }
+        try (java.io.Writer w = new java.io.OutputStreamWriter(
+                new java.io.FileOutputStream(file), StandardCharsets.UTF_8)) {
+            w.write(text);
+        }
     }
 
     // ------------------------------------------------------------------ запись
@@ -568,6 +747,17 @@ public final class QuestCli {
         out.println("  reward-remove <файл> <questID> (--index N | --item S)");
         out.println("  patch <файл> (--json '{...}' | --patch-file F)   слияние JSON-патча");
         out.println("  audit <файл>                   сверка id предметов с базой (бедрок в игре)");
+        out.println();
+        out.println();
+        out.println("Связь с запущенной игрой (мод DwQuestsBridge):");
+        out.println("  link                              есть ли связь, что сейчас делает игра");
+        out.println("  link-tabs                         вкладки в игре");
+        out.println("  link-get <tabID> [--out файл]     забрать вкладку из памяти клиента");
+        out.println("  link-all <папка>                  забрать все вкладки");
+        out.println("  link-paste <файл> [--tab T] [--clipboard]   отправить вкладку в игру");
+        out.println("  link-icon <строка предмета> [--out файл]    нарисовать иконку силами игры");
+        out.println("  link-export icons|assets|tabs [--scope all|quests]   выгрузка в самой игре");
+        out.println("  link-icons-pull [--wait]          перенести выгруженные иконки в папку редактора");
         out.println();
         out.println("Ключи квеста: --name, --x, --y, --icon, --rarity, --size, --node,");
         out.println("              --tasks-type, --desc, --broadcast, --parent ID, --reward S");

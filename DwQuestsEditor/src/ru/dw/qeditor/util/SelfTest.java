@@ -67,6 +67,45 @@ public final class SelfTest {
               .append(", 'i'=").append(font.charWidth('i')).append('\n');
             sb.append("Ширина строки \"Привет, мир!\" = ").append(font.width("Привет, мир!")).append(" px\n");
         }
+
+        sb.append('\n').append(iconNamingCheck());
+        sb.append(ru.dw.qeditor.link.GameLink.get().connected()
+                ? "Связь с игрой: " + ru.dw.qeditor.link.GameLink.get().status() + "\n"
+                : "Связь с игрой: нет (мост ищется в <клиент>/dwq_export/bridge.json)\n");
+        return sb.toString();
+    }
+
+    /**
+     * Имя файла иконки для предмета с NBT редактор и мод-выгрузчик считают
+     * независимо друг от друга — и обязаны сойтись, иначе выгруженные варианты
+     * (цветы Botany и прочая генетика) просто не найдутся.
+     *
+     * <p>Ожидаемые хеши сняты с самого мода: {@code Names.nbtHash} прогонялся
+     * на этих же строках через настоящий {@code JsonToNBT} 1.7.10.
+     */
+    private static String iconNamingCheck() {
+        String[][] cases = {
+                {"{display:{Name:\"Rosa\"}}", "cf2430c8"},
+                {"{b:1,a:2}", "86ec606c"},
+                {"{a:2,b:1}", "86ec606c"},
+                {"{Age:3b,Health:1.0f,Genome:\"rosa|white\"}", "1b87a44f"},
+                {"{Layers:[0,1],MinRandom:1}", "fc803fc6"},
+                {"{Items:[0:{Slot:0b,ID:\"minecraft:dirt=1\"}],DropType:\"RANDOM\"}", "bf9130b8"},
+                {"{Count:1b,Damage:0s,Weird:1.50d}", "53f1f1df"}
+        };
+        StringBuilder sb = new StringBuilder();
+        int bad = 0;
+        for (String[] c : cases) {
+            String got = ru.dw.qeditor.assets.ItemRegistry.hash8(
+                    ru.dw.qeditor.assets.NbtLite.canonical(c[0]));
+            if (!got.equals(c[1])) {
+                bad++;
+                sb.append("  РАСХОЖДЕНИЕ: ").append(c[0]).append(" → ").append(got)
+                  .append(", а мод считает ").append(c[1]).append('\n');
+            }
+        }
+        sb.insert(0, "Имена иконок с NBT сходятся с модом: "
+                + (bad == 0 ? "да (" + cases.length + " проверок)" : "НЕТ, расхождений " + bad) + "\n");
         return sb.toString();
     }
 
