@@ -338,7 +338,7 @@ public final class QuestCli {
         if (!file.isFile()) throw new UsageException("файл не найден: " + file.getAbsolutePath());
         QuestTab tab = TabIO.load(file);
         String tabID = a.str("tab", tab.tabID);
-        String json = tab.toJsonString();
+        String json = tab.toCompactJson();
         GameLink link = link();
         if (a.flag("clipboard")) {
             link.toClipboard(tabID, json);

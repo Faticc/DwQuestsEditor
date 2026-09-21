@@ -205,7 +205,7 @@ final class GameActions {
             app.status("У вкладки нет tabID");
             return;
         }
-        final String json = app.model().tab().toJsonString();
+        final String json = app.model().tab().toCompactJson();
         if (clipboardOnly) {
             try {
                 GameLink.get().toClipboard(tabID, json);
@@ -251,9 +251,12 @@ final class GameActions {
                 continue;
             }
             try {
+                // файл с диска только сжимается (без пробелов), а не пересобирается
+                // моделью: неизвестные поля и порядок ключей остаются как были
                 String json = current != null && current.getAbsoluteFile().equals(e.file.getAbsoluteFile())
-                        ? app.model().tab().toJsonString()
-                        : new String(java.nio.file.Files.readAllBytes(e.file.toPath()), StandardCharsets.UTF_8);
+                        ? app.model().tab().toCompactJson()
+                        : ru.dw.qeditor.json.JsonWriter.write(JsonParser.parse(
+                                new String(java.nio.file.Files.readAllBytes(e.file.toPath()), StandardCharsets.UTF_8)), false);
                 tabs.add(new String[]{e.tabID, json});
                 names.append("\n• ").append(e.tabID).append(" (").append(e.questCount).append(")");
             } catch (Exception ex) {
@@ -515,18 +518,22 @@ final class GameActions {
         t.start();
     }
 
+    /**
+     * Ответ сервера — строкой состояния внизу, без окна: выполнять квесты
+     * приходится подряд, и окно на каждый щелчок только мешало.
+     */
     private void showResult(String title, JsonObject r) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(r.str("done", "")).append('\n');
         JsonArray replies = r.arr("replies");
+        StringBuilder sb = new StringBuilder(title).append(" — ");
         if (replies == null || replies.size() == 0) {
-            sb.append("\nСервер в чат ничего не ответил.");
+            sb.append("отправлено, сервер в чат ничего не ответил");
         } else {
-            sb.append("\nОтвет сервера:\n");
-            for (int i = 0; i < replies.size(); i++) sb.append("  ").append(replies.str(i)).append('\n');
+            for (int i = 0; i < replies.size(); i++) {
+                if (i > 0) sb.append("  •  ");
+                sb.append(ru.dw.qeditor.assets.ItemRegistry.stripColor(replies.str(i)));
+            }
         }
-        app.status(title + " — готово" + (replies == null || replies.size() == 0 ? "" : ": " + replies.str(0)));
-        app.showText(title, sb.toString().trim());
+        app.status(sb.toString());
     }
 
     // -------------------------------------------------------------- выгрузка

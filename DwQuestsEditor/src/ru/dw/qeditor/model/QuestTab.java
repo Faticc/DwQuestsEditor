@@ -81,6 +81,13 @@ public class QuestTab {
 
     public String toJsonString() { return JsonWriter.write(toJson(), true); }
 
+    /**
+     * Без отступов и переносов — так вкладка уходит в игру. {@code /dwq tab paste}
+     * шлёт буфер одним пакетом (CSPEditTab, zstd), а пакет от клиента в 1.7.10 не
+     * больше 32 КБ: отступы стоят килобайт после сжатия, и большие вкладки не влезали.
+     */
+    public String toCompactJson() { return JsonWriter.write(toJson(), false); }
+
     public QuestTab copy() { return parse(toJsonString()); }
 
     /** Переименовать квест, поправив ссылки в зависимостях других квестов. */
