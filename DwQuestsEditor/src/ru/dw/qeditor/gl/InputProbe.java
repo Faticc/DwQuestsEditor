@@ -28,6 +28,9 @@ public final class InputProbe {
         in.onKey(key, 0, down ? GLFW_PRESS : GLFW_RELEASE, mods);
     }
 
+    /** Набранный текст — как символы, что GLFW шлёт отдельно от клавиш. */
+    public static void type(Input in, String s) { s.codePoints().forEach(in::onChar); }
+
     /** Конец кадра: события прожиты, нажатия-отпускания сброшены. */
     public static void endFrame(Input in) { in.endFrame(); }
 }

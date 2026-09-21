@@ -85,6 +85,8 @@ public final class App {
 
     private final Deque<Dialog> dialogs = new ArrayDeque<>();
     private final List<Quest> questClipboard = new ArrayList<>();
+    /** Что мы сами положили в системный буфер вместе с questClipboard. */
+    private String questClipboardText;
 
     private int page;
     private int lastPage;
@@ -131,6 +133,7 @@ public final class App {
 
         window.setOnCloseRequest(this::exit);
         model.addListener(this::onModelChanged);
+        model.setTypingProbe(ui::keyboardCaptured);
         updateTitle();
         checkAssets();
         restoreLastFolder();
@@ -551,12 +554,17 @@ public final class App {
         if (ui.shortcut(GLFW_KEY_N, true)) newTab();
         if (ui.shortcut(GLFW_KEY_O, true)) open();
         if (ui.shortcut(GLFW_KEY_S, true)) save();
-        if (ui.shortcut(GLFW_KEY_Z, true)) undo();
-        if (ui.shortcut(GLFW_KEY_Y, true)) redo();
-        if (ui.shortcut(GLFW_KEY_D, true)) duplicateSelected();
-        if (ui.shortcut(GLFW_KEY_A, true)) model.selectAll();
-        if (ui.shortcut(GLFW_KEY_C, true)) copyQuests();
-        if (ui.shortcut(GLFW_KEY_V, true)) pasteQuests(0, 0);
+        // Поле ввода в фокусе само разбирает Ctrl+A/C/V/X/Z/Y (TextBuf.handleKeys),
+        // и эти же клавиши не должны доставаться квестам: иначе Ctrl+C из поля
+        // затирал буфер JSON-ом выделенных квестов, а Ctrl+V вставлял квесты в карту.
+        if (!ui.keyboardCaptured()) {
+            if (ui.shortcut(GLFW_KEY_Z, true)) undo();
+            if (ui.shortcut(GLFW_KEY_Y, true)) redo();
+            if (ui.shortcut(GLFW_KEY_D, true)) duplicateSelected();
+            if (ui.shortcut(GLFW_KEY_A, true)) model.selectAll();
+            if (ui.shortcut(GLFW_KEY_C, true)) copyQuests();
+            if (ui.shortcut(GLFW_KEY_V, true)) pasteQuests(0, 0);
+        }
         if (ui.shortcut(GLFW_KEY_T, true)) validateTab();
         if (ui.shortcut(GLFW_KEY_H, true)) showVersions();
         if (ui.shortcut(GLFW_KEY_F11, false)) toggleFullscreen();
@@ -1006,14 +1014,18 @@ public final class App {
         }
         JsonObject holder = new JsonObject();
         for (Quest q : questClipboard) holder.put(q.questID, q.toJson());
-        window.setClipboard(JsonWriter.write(holder, true));
+        questClipboardText = JsonWriter.write(holder, true);
+        window.setClipboard(questClipboardText);
         status("Скопировано квестов: " + questClipboard.size());
     }
 
     private void pasteQuests(float atX, float atY) {
-        List<Quest> source = new ArrayList<>(questClipboard);
+        // свои квесты берём, только пока в системном буфере лежит то, что мы туда
+        // положили: если с тех пор скопировали что-то ещё, вставлять надо уже его
+        String text = window.clipboard();
+        List<Quest> source = new ArrayList<>();
+        if (text != null && text.equals(questClipboardText)) source.addAll(questClipboard);
         if (source.isEmpty()) {
-            String text = window.clipboard();
             if (text != null && text.trim().startsWith("{")) {
                 try {
                     Object parsed = JsonParser.parse(text);

@@ -32,6 +32,8 @@ public class EditorModel {
 
     private final Set<String> selection = new LinkedHashSet<>();
     private boolean suppressEvents;
+    /** Идёт ли сейчас набор в поле — правки тогда склеиваются в истории. */
+    private java.util.function.BooleanSupplier typing = () -> false;
 
     public EditorModel() {
         history.reset(tab.toJsonString());
@@ -55,6 +57,8 @@ public class EditorModel {
     public boolean isDirty() { return dirty; }
 
     public History history() { return history; }
+
+    public void setTypingProbe(java.util.function.BooleanSupplier probe) { typing = probe; }
 
     public long fileStamp() { return fileStamp; }
 
@@ -86,7 +90,7 @@ public class EditorModel {
         change.run();
         String after = tab.toJsonString();
         if (before.equals(after)) return;
-        history.push(before, label);
+        history.push(before, label, typing.getAsBoolean());
         history.commit(after, label);
         dirty = true;
         fire("data");
