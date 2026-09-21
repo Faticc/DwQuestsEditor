@@ -139,7 +139,9 @@ public class CommandDwqb extends CommandBase {
         String tabID = args[0].replace('_', ' ');
         File file = args.length > 1
                 ? new File(args[1])
-                : new File(ExportTasks.tabsDir(), Names.esc(tabID) + ".json");
+                : new File(ExportTasks.tabsDir(), Names.tabFile(tabID));
+        // выгрузки прежних версий лежат с пробелами в имени
+        if (!file.isFile() && args.length == 1) file = new File(ExportTasks.tabsDir(), Names.esc(tabID) + ".json");
         if (!file.isFile()) throw new IllegalArgumentException("нет файла " + file);
         TabUpload.paste(tabID, read(file));
     }

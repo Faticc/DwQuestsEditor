@@ -98,8 +98,7 @@ public class Workspace {
 
     /** Файл вкладки внутри папки по имени; расширение добавится само. */
     public File fileFor(String tabID) {
-        String safe = tabID == null ? "Tab" : tabID.replaceAll("[\\\\/:*?\"<>|]", "_");
-        return new File(dir, safe + ".json");
+        return new File(dir, TabIO.fileName(tabID));
     }
 
     public boolean contains(File file) { return find(file) != null; }

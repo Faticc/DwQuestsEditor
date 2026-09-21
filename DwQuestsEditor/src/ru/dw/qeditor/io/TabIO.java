@@ -48,8 +48,16 @@ public final class TabIO {
 
     /** Имя файла по умолчанию для вкладки. */
     public static String fileName(QuestTab tab) {
-        String id = tab == null || tab.tabID == null ? "Tab" : tab.tabID;
-        return id.replaceAll("[\\\\/:*?\"<>|]", "_") + ".json";
+        return fileName(tab == null ? null : tab.tabID);
+    }
+
+    /**
+     * Имя файла вкладки: пробелы — подчёркиванием, как в командах мода
+     * ({@code /dwq tab paste Имя_вкладки}); запрещённые системой знаки — тоже.
+     */
+    public static String fileName(String tabID) {
+        String id = tabID == null || tabID.isEmpty() ? "Tab" : tabID;
+        return id.replaceAll("[\\\\/:*?\"<>|\\s]", "_") + ".json";
     }
 
     // ------------------------------------------------------------------ буфер обмена

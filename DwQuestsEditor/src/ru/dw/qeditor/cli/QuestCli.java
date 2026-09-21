@@ -318,7 +318,7 @@ public final class QuestCli {
             String tabID = o.str("tabID", "");
             try {
                 String json = link.tab(tabID);
-                File file = new File(dir, tabID + ".json");
+                File file = new File(dir, TabIO.fileName(tabID));
                 writeText(file, json);
                 out.println("  " + file.getName() + " — " + json.length() + " симв.");
                 ok++;

@@ -133,7 +133,7 @@ public final class TabDumpJob implements Job {
     }
 
     private void write(String tabID, String json, String source) {
-        File out = new File(dir, Names.esc(tabID) + ".json");
+        File out = new File(dir, Names.tabFile(tabID));
         try {
             if (!dir.isDirectory() && !dir.mkdirs()) throw new RuntimeException("нет папки " + dir);
             Writer w = new OutputStreamWriter(new FileOutputStream(out), "UTF-8");

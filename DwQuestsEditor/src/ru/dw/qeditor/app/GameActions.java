@@ -11,6 +11,7 @@ import ru.dw.qeditor.link.IconImport;
 import ru.dw.qeditor.gl.GlWindow;
 import ru.dw.qeditor.gl.Textures;
 import ru.dw.qeditor.io.Backups;
+import ru.dw.qeditor.io.TabIO;
 import ru.dw.qeditor.io.Workspace;
 
 import java.io.File;
@@ -151,7 +152,7 @@ final class GameActions {
                 target = fileInFolder(ws, tabID);
             } else {
                 target = FileDialogs.saveJson("Сохранить вкладку из игры",
-                        new File(suggestedFolder(), tabID + ".json"));
+                        new File(suggestedFolder(), TabIO.fileName(tabID)));
                 if (target == null) return;
             }
             write(target, json);
@@ -177,7 +178,7 @@ final class GameActions {
         for (String tabID : names) {
             try {
                 String json = GameLink.get().tab(tabID);
-                File file = ws != null ? fileInFolder(ws, tabID) : new File(dir, tabID + ".json");
+                File file = ws != null ? fileInFolder(ws, tabID) : new File(dir, TabIO.fileName(tabID));
                 write(file, json);
                 ok++;
                 report.append("✓ ").append(file.getName()).append(" — ")
@@ -417,10 +418,17 @@ final class GameActions {
      * пишем в него, чтобы не плодить двойников.
      */
     private static File fileInFolder(Workspace ws, String tabID) {
+        File wanted = ws.fileFor(tabID);
         for (Workspace.Entry e : ws.entries()) {
-            if (tabID.equals(e.tabID)) return e.file;
+            if (!tabID.equals(e.tabID)) continue;
+            // Прежние версии называли файл по tabID как есть, с пробелами, — такой
+            // переименовываем. Имя, которое файлу дал человек, не трогаем.
+            if (e.file.getName().equals(tabID + ".json") && !wanted.exists() && e.file.renameTo(wanted)) {
+                return wanted;
+            }
+            return e.file;
         }
-        return ws.fileFor(tabID);
+        return wanted;
     }
 
     /** Записать, а прежнее содержимое оставить версией — его можно вернуть. */

@@ -205,6 +205,14 @@ public final class Names {
         return out;
     }
 
+    /**
+     * Имя файла вкладки: пробелы — подчёркиванием, как в {@code /dwq tab paste Имя_вкладки}
+     * и как называет файлы редактор.
+     */
+    public static String tabFile(String tabID) {
+        return esc(tabID).replace(' ', '_') + ".json";
+    }
+
     /** Название предмета в игре; у битых предметов бывает исключение. */
     public static String displayName(ItemStack stack) {
         try {
