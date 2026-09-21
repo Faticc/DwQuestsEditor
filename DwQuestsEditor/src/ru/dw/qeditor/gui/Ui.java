@@ -142,6 +142,17 @@ public final class Ui {
 
     public float my() { return in.mouseY / scale - originY; }
 
+    /**
+     * Точка текущей системы координат — в координатах окна.
+     *
+     * <p>Нужна тем, кто отдаёт координаты верхнему слою: {@link Popup} рисуется
+     * с чистым началом координат, а раскрывают его виджеты изнутри
+     * прокручиваемых областей, где начало уже съехало.
+     */
+    public float toScreenX(float x) { return x + originX; }
+
+    public float toScreenY(float y) { return y + originY; }
+
     /** Курсор в координатах окна. */
     public float screenMx() { return in.mouseX / scale; }
 
@@ -630,7 +641,10 @@ public final class Ui {
                                float contentWidth, float contentHeight) {
         float[] s = scrollState(id);
         if (over(x, y, w, h) && in.scrollY != 0) {
-            s[1] -= in.scrollY * 48;
+            // Shift — вбок; вбок же, если прокручивать по вертикали нечего
+            // (так листается предпросмотр, который шире панели)
+            boolean sideways = in.shift() || (contentHeight <= h && contentWidth > w);
+            s[sideways ? 0 : 1] -= in.scrollY * 48;
             in.consumeScroll();
         }
         float maxY = Math.max(0, contentHeight - h);

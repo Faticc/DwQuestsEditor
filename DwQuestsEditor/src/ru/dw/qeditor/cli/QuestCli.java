@@ -63,6 +63,7 @@ public final class QuestCli {
             case "list":       return list(a);
             case "show":       return show(a);
             case "validate":   return validate(a);
+            case "audit":      return audit(a);
             case "format":     return format(a);
             case "export":     return export(a);
             case "new":        return newTab(a);
@@ -137,6 +138,14 @@ public final class QuestCli {
         }
         out.println("Всего замечаний: " + problems.size() + ", из них ошибок: " + errors);
         return errors > 0 ? 1 : 0;
+    }
+
+    /** Сверка id предметов с базой: что в игре превратится в бедрок. */
+    private static int audit(Args a) throws Exception {
+        QuestTab tab = a.tab();
+        ru.dw.qeditor.io.IdAudit.Report r = ru.dw.qeditor.io.IdAudit.check(tab);
+        out.print(ru.dw.qeditor.io.IdAudit.text(r));
+        return r.unknown.isEmpty() ? 0 : 1;
     }
 
     private static int format(Args a) throws Exception {
@@ -415,23 +424,8 @@ public final class QuestCli {
         Object parsed = JsonParser.parse(TabIO.stripBom(json));
         if (!(parsed instanceof JsonObject)) throw new UsageException("патч должен быть JSON-объектом");
 
-        JsonObject base = tab.toJson();
-        merge(base, (JsonObject) parsed);
-        QuestTab merged = QuestTab.parse(JsonWriter.write(base, true));
+        QuestTab merged = ru.dw.qeditor.io.TabPatch.apply(tab, (JsonObject) parsed);
         return write(a, merged, "Патч применён");
-    }
-
-    private static void merge(JsonObject base, JsonObject patch) {
-        for (String key : patch.keys()) {
-            Object v = patch.get(key);
-            if (v == null) {
-                base.remove(key);
-            } else if (v instanceof JsonObject && base.get(key) instanceof JsonObject) {
-                merge((JsonObject) base.get(key), (JsonObject) v);
-            } else {
-                base.put(key, v);
-            }
-        }
     }
 
     // ------------------------------------------------------------------ вспомогательное
@@ -573,6 +567,7 @@ public final class QuestCli {
         out.println("  reward-add <файл> <questID> --item \"minecraft:diamond=3\" [--item ...]");
         out.println("  reward-remove <файл> <questID> (--index N | --item S)");
         out.println("  patch <файл> (--json '{...}' | --patch-file F)   слияние JSON-патча");
+        out.println("  audit <файл>                   сверка id предметов с базой (бедрок в игре)");
         out.println();
         out.println("Ключи квеста: --name, --x, --y, --icon, --rarity, --size, --node,");
         out.println("              --tasks-type, --desc, --broadcast, --parent ID, --reward S");

@@ -38,7 +38,10 @@ public final class PreviewView {
 
     public float getGuiScale() { return guiScale; }
 
-    public void setGuiScale(float scale) { this.guiScale = Math.max(1f, Math.min(4f, scale)); }
+    /** Масштаб целый, как guiScale в игре: дробный «шакалит» пиксельные текстуры. */
+    public void setGuiScale(float scale) {
+        this.guiScale = Math.max(1f, Math.min(4f, Math.round(scale)));
+    }
 
     public void draw(Ui ui, float x, float y, float w, float h) {
         if (w < 8 || h < 8) return;
@@ -61,6 +64,9 @@ public final class PreviewView {
         ui.pushClip(x, y, w, h);
         p.push();
         p.translate(x, y);
+        // начало — на целом пикселе экрана: шрифт и текстуры мода рисуются
+        // GL_NEAREST, и полпикселя сдвига делают их «мыльными»
+        p.snap();
         // после этого единица рисователя — виртуальный пиксель GUI мода
         p.scale(guiScale / uiScale);
         preview.setGuiScale(guiScale);

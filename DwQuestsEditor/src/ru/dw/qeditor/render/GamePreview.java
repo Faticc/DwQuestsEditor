@@ -147,6 +147,9 @@ public class GamePreview {
 
     public float getZoom() { return zoomFactor; }
 
+    /** Зум карты, как в моде: 1 — вплотную, 2 — вдвое больше видно. */
+    public void setZoom(float zoom) { zoomFactor = Math.max(1f, Math.min(2f, zoom)); }
+
     public String getOpenQuestID() { return openQuestID; }
 
     public void openQuest(String questID) {

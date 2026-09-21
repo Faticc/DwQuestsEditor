@@ -204,8 +204,11 @@ public final class TabIO {
         ForgeName fn = ForgeName.parse(forgeString);
         if (fn.isCommand() || fn.isGift() || fn.isScript()) return;
         if (!ItemRegistry.get().hasIcon(forgeString))
+            // ForgeNameUtils.getForgeItem отдаёт BEDROCK на всё, чего нет в
+            // реестре: бедрок в игре — это почти всегда опечатка или id из
+            // мода, которого нет на сервере (либо база иконок устарела)
             out.add(new Problem(Severity.WARNING, questID,
-                    what + ": нет иконки для «" + fn.id + "» (в игре предмет может отсутствовать)"));
+                    what + ": id «" + fn.id + "» не найден в базе предметов — в игре будет бедрок"));
     }
 
     /** Поиск цикла в графе зависимостей внутри вкладки. */

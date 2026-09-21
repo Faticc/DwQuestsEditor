@@ -11,6 +11,7 @@ import ru.dw.qeditor.gui.Theme;
 import ru.dw.qeditor.gui.Ui;
 import ru.dw.qeditor.gui.Widgets;
 import ru.dw.qeditor.io.Backups;
+import ru.dw.qeditor.io.IdAudit;
 import ru.dw.qeditor.io.TabIO;
 import ru.dw.qeditor.io.Workspace;
 import ru.dw.qeditor.json.JsonObject;
@@ -59,7 +60,8 @@ import static org.lwjgl.glfw.GLFW.GLFW_KEY_Z;
 public final class App {
 
     private static final float PROJECT_WIDTH = 240;
-    private static final String[] PAGES = {"Редактор", "Просмотр как в игре", "Помощник Claude"};
+    private static final String[] PAGES =
+            {"Редактор", "Просмотр как в игре", "JSON", "Помощник Claude"};
 
     private final GlWindow window;
     private final Batch batch;
@@ -73,6 +75,7 @@ public final class App {
     private final PreviewView preview = new PreviewView();
     private final Sidebar sidebar;
     private final AssistantView assistant;
+    private final JsonView json;
 
     private final Deque<Dialog> dialogs = new ArrayDeque<>();
     private final List<Quest> questClipboard = new ArrayList<>();
@@ -104,6 +107,7 @@ public final class App {
         ui = new Ui(window, batch);
         sidebar = new Sidebar(model, popup, this::open);
         assistant = new AssistantView(model, popup);
+        json = new JsonView(model);
 
         map.setCallbacks(new MapCallbacks());
         preview.setGuiScale(Config.get().guiScale);
@@ -152,6 +156,9 @@ public final class App {
         frame();
         ui.end();
         batch.end();
+        // снимок вкладки для помощника рисуется тем же пакетом вершин, поэтому
+        // только после того, как кадр окна закончен
+        assistant.afterBatch(batch);
     }
 
     private void frame() {
@@ -241,6 +248,7 @@ public final class App {
                 float ph = Math.max(80, y + h - cy - 8);
                 preview.draw(ui, x + 8, cy, w - 16, ph);
             }
+            case 2 -> json.draw(ui, x + 12, cy + 4, w - 24, Math.max(80, y + h - cy - 16));
             default -> assistant.draw(ui, x + 12, cy + 4, w - 24, Math.max(80, y + h - cy - 16));
         }
     }
@@ -263,7 +271,8 @@ public final class App {
 
         ui.textIn("сетка", bx, by, 40, bh, Theme.TEXT_MUTED, Ui.LEFT, Theme.FONT_SMALL, false);
         bx += 40;
-        map.setGridSize(ui.intField("grid", bx, by, 56, bh, map.getGridSize(), 1, 16));
+        // шаг дробный: в игре клетка — 24 пикселя, и половина клетки осмысленна
+        map.setGridSize(ui.floatField("grid", bx, by, 56, bh, map.getGridSize(), 0.25f));
         bx += 62;
 
         ui.textIn("сдвиг", bx, by, 40, bh, Theme.TEXT_MUTED, Ui.LEFT, Theme.FONT_SMALL, false);
@@ -434,13 +443,13 @@ public final class App {
                 });
                 separator(items, actions);
                 item(items, actions, "Проверить вкладку", "Ctrl+T", this::validateTab);
+                item(items, actions, "Сверить id предметов", null, this::auditIds);
                 item(items, actions, "Диагностика окружения", null,
                         () -> showText("Диагностика окружения", SelfTest.run()));
                 item(items, actions, "Настройки…", null, this::settings);
                 separator(items, actions);
-                item(items, actions, "Помощник Claude", null, () -> page = 2);
-                item(items, actions, "Показать JSON вкладки", null,
-                        () -> showText("JSON вкладки", model.tab().toJsonString()));
+                item(items, actions, "Помощник Claude", null, () -> page = 3);
+                item(items, actions, "Страница JSON", null, () -> page = 2);
             }
             default -> {
                 item(items, actions, "Горячие клавиши", null, this::showHelp);
@@ -978,6 +987,14 @@ public final class App {
                 : "Замечаний: " + problems.size() + ", ошибок: " + errors);
     }
 
+    /** Какие id вкладки в игре превратятся в бедрок — вместе с местом, где они. */
+    private void auditIds() {
+        IdAudit.Report r = IdAudit.check(model.tab());
+        showText("Сверка id предметов", IdAudit.text(r));
+        status(r.unknown.isEmpty() ? "Неизвестных id нет"
+                : "Нет в базе id: " + r.unknown.size() + " — в игре это бедрок");
+    }
+
     private void showVersions() {
         open(VersionsDialog.open(model.file(), model.tab(), restoredTab -> {
             Backups.save(model.file(), model.tab().toJsonString(),
@@ -1211,5 +1228,8 @@ public final class App {
     private void onModelChanged(String what) {
         updateTitle();
         if ("tab".equals(what) && page == 1) feedPreviewTabs();
+        // страница JSON показывает модель, а не свою копию: любая правка —
+        // хоть из полей справа, хоть сменой вкладки — требует перечитать текст
+        json.reset();
     }
 }

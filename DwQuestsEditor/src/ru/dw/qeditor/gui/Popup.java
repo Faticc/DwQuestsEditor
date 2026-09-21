@@ -40,8 +40,8 @@ public final class Popup {
     private final List<Item> items = new ArrayList<>();
     private float x, y;
     private float minWidth;
-    /** Куда открывать вверх, если внизу не помещается. */
-    private boolean flipUp;
+    /** Куда ставить низ меню, если вниз оно не помещается (верх того, что раскрыли). */
+    private float above;
     private int picked = -1;
     private Object pickedOwner;
     /** Кадр, в котором меню открыли: щелчок, открывший его, не должен закрыть. */
@@ -54,9 +54,22 @@ public final class Popup {
     public Object owner() { return owner; }
 
     public void open(Object owner, float x, float y, List<Item> items, float minWidth) {
+        open(owner, x, y, y, items, minWidth);
+    }
+
+    /**
+     * Раскрыть меню под чем-то: {@code below} — где у него низ, {@code above} —
+     * где верх. Если вниз меню не влезает, оно встаёт над этим «чем-то», а не
+     * поверх него.
+     *
+     * <p>Координаты — в координатах окна ({@link Ui#toScreenX}): меню рисуется
+     * верхним слоем, где начало координат уже своё.
+     */
+    public void open(Object owner, float x, float below, float above, List<Item> items, float minWidth) {
         this.owner = owner;
         this.x = x;
-        this.y = y;
+        this.y = below;
+        this.above = above;
         this.minWidth = minWidth;
         this.items.clear();
         this.items.addAll(items);
@@ -94,40 +107,55 @@ public final class Popup {
             if (it.accel() != null) w += ui.textWidth(it.accel(), Theme.FONT_SMALL, false) + 24;
             width = Math.max(width, w);
         }
-        float height = padding * 2;
-        for (Item it : items) height += it.separator() ? sepH : rowH;
+        float content = 0;
+        for (Item it : items) content += it.separator() ? sepH : rowH;
 
-        float px = Math.min(x, ui.width() - width - 4);
-        float py = flipUp || y + height > ui.height() ? Math.max(4, y - height) : y;
+        // Список типов задач длиннее экрана. Раньше он в таком случае
+        // «переворачивался» вверх и уезжал в другой угол, да ещё и ловил тот же
+        // щелчок, которым его открыли. Теперь он просто прокручивается.
+        float maxH = ui.height() - 8;
+        float height = Math.min(content + padding * 2, maxH);
+        float px = Math.max(4, Math.min(x, ui.width() - width - 4));
+        float py = y;
+        if (py + height > ui.height()) py = Math.max(4, above - height);
+        py = Math.max(4, Math.min(py, ui.height() - height - 4));
 
         ui.beginOverlay();
         // тень под меню: мягкого размытия нет, но подложка отделяет его от фона
         ui.roundRect(px + 2, py + 3, width, height, Theme.RADIUS, 0x60000000);
         ui.roundRectBorder(px, py, width, height, Theme.RADIUS, 0xFF1C2430, Theme.BORDER_STRONG, 1);
 
+        Object scrollId = this + " scroll";
+        float viewH = height - padding * 2;
+        if (justOpened) ui.setScrollY(scrollId, initialScroll(rowH, sepH, viewH));
+
         int result = -1;
-        float iy = py + padding;
+        ui.beginScroll(scrollId, px, py + padding, width, viewH, width, content);
+        float iy = 0;
         for (int i = 0; i < items.size(); i++) {
             Item it = items.get(i);
             if (it.separator()) {
-                ui.hSeparator(px + 8, iy + sepH / 2, width - 16);
+                ui.hSeparator(8, iy + sepH / 2, width - 16);
                 iy += sepH;
                 continue;
             }
-            boolean hovered = it.enabled() && ui.over(px, iy, width, rowH);
-            if (hovered) ui.rect(px + 3, iy, width - 6, rowH, Theme.HOVER);
+            boolean hovered = it.enabled() && ui.over(0, iy, width, rowH);
+            if (hovered) ui.rect(3, iy, width - 6, rowH, Theme.HOVER);
             int color = it.enabled() ? Theme.TEXT : Theme.TEXT_DISABLED;
             if (it.checkbox() && it.checked()) {
-                ui.line(px + 11, iy + rowH / 2, px + 14, iy + rowH / 2 + 3.5f, 2, Theme.ACCENT);
-                ui.line(px + 14, iy + rowH / 2 + 3.5f, px + 20, iy + rowH / 2 - 4f, 2, Theme.ACCENT);
+                ui.line(11, iy + rowH / 2, 14, iy + rowH / 2 + 3.5f, 2, Theme.ACCENT);
+                ui.line(14, iy + rowH / 2 + 3.5f, 20, iy + rowH / 2 - 4f, 2, Theme.ACCENT);
             }
-            ui.text(it.label(), px + 26, iy + (rowH - ui.lineHeight()) / 2f, color);
+            ui.text(it.label(), 26, iy + (rowH - ui.lineHeight()) / 2f, color);
             if (it.accel() != null)
-                ui.textIn(it.accel(), px, iy, width - 12, rowH, Theme.TEXT_DISABLED, Ui.RIGHT,
+                ui.textIn(it.accel(), 0, iy, width - 12, rowH, Theme.TEXT_DISABLED, Ui.RIGHT,
                         Theme.FONT_SMALL, false);
-            if (hovered && ui.in().leftPressed()) result = i;
+            // щелчок, которым меню открыли, выбором не считается: пункт может
+            // оказаться ровно под курсором
+            if (hovered && ui.in().leftPressed() && !justOpened) result = i;
             iy += rowH;
         }
+        ui.endScroll(scrollId, px, py + padding, width, viewH, width, content);
 
         boolean outside = ui.in().leftPressed() && !ui.over(px, py, width, height);
         ui.endOverlay();
@@ -141,6 +169,20 @@ public final class Popup {
         }
         justOpened = false;
         return result;
+    }
+
+    /** Прокрутка при раскрытии: отмеченный пункт должен быть виден. */
+    private float initialScroll(float rowH, float sepH, float viewH) {
+        float iy = 0;
+        for (Item it : items) {
+            if (it.separator()) {
+                iy += sepH;
+                continue;
+            }
+            if (it.checked()) return Math.max(0, iy - viewH / 2 + rowH / 2);
+            iy += rowH;
+        }
+        return 0;
     }
 
     /** Меню открыто — нижние слои в этом кадре ввод не получают. */

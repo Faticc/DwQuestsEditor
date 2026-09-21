@@ -59,20 +59,30 @@ public final class McPreview {
     public void draw(Ui ui, float x, float y, float w, float h) {
         if (w < 8 || h < 8) return;
         McLabel label = buildLabel();
-        // ширина метки фиксирована (как в игре), поэтому масштаб подбираем так,
-        // чтобы она влезла в панель — иначе предпросмотр обрезался бы по краю
-        float fit = Math.min(scale, (w - 2) / (float) LABEL_WIDTH);
-        float content = Math.max(h - 2, (label.getHeight() + 4) * fit);
+
+        // Пиксель шрифта мода должен занимать целое число пикселей экрана.
+        // При дробном масштабе GL_NEAREST даёт соседним пикселям глифа разную
+        // ширину — буквы разваливаются («шакалятся»). Поэтому масштаб целый, а
+        // если метка шире панели, она прокручивается, а не сжимается.
+        float deviceW = (w - 2) * ui.scale();
+        int device = Math.max(1, Math.min(scale * Math.max(1, Math.round(ui.scale())),
+                (int) Math.floor(deviceW / LABEL_WIDTH)));
+        // сколько логических точек на один пиксель шрифта
+        float unit = device / ui.scale();
+
+        float contentW = LABEL_WIDTH * unit;
+        float contentH = Math.max(h - 2, (label.getHeight() + 4) * unit);
 
         ui.roundRectBorder(x, y, w, h, Theme.RADIUS_SMALL, 0xFF1A1D26, Theme.BORDER, 1);
-        ui.beginScroll(id, x + 1, y + 1, w - 2, h - 2, w - 2, content);
+        ui.beginScroll(id, x + 1, y + 1, w - 2, h - 2, contentW, contentH);
         GuiPainter p = ui.painter();
         p.push();
+        p.snap();
         // внутри этой матрицы единица — пиксель шрифта Minecraft
-        p.scale(fit / ui.scale());
+        p.scale(unit);
         label.setY(2);
         label.draw(p);
         p.pop();
-        ui.endScroll(id, x + 1, y + 1, w - 2, h - 2, w - 2, content);
+        ui.endScroll(id, x + 1, y + 1, w - 2, h - 2, contentW, contentH);
     }
 }

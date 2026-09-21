@@ -175,7 +175,7 @@ public final class GiftDialog extends Dialog {
             }
         }
 
-        p.text("§7ЛКМ — выбрать предмет, ПКМ — очистить, колесо — количество",
+        p.text("§7ЛКМ — предмет, Shift+ЛКМ — гифт, ПКМ — убрать, колесо — число",
                 8, GUI_H - 12, -1, true);
     }
 
@@ -259,8 +259,17 @@ public final class GiftDialog extends Dialog {
                 if (right) {
                     slots[slotIndex] = null;
                 } else if (openDialog != null) {
-                    String current = slots[slotIndex] == null ? "minecraft:diamond" : slots[slotIndex];
-                    openDialog.accept(ItemPicker.open(current, s -> slots[slotIndex] = s));
+                    String current = slots[slotIndex];
+                    // гифт внутри гифта правится тем же окном, а не выбором
+                    // предмета: иначе до его слоёв и содержимого не добраться
+                    if (Gifts.isGift(current) || ui.in().shift()) {
+                        String gift = Gifts.isGift(current) ? current : "DwQuests:Gift:0";
+                        openDialog.accept(GiftDialog.edit(gift, s -> slots[slotIndex] = s, openDialog));
+                    } else {
+                        openDialog.accept(ItemPicker.open(
+                                current == null ? "minecraft:diamond" : current,
+                                s -> slots[slotIndex] = s));
+                    }
                 }
             }
         }
@@ -361,6 +370,11 @@ public final class GiftDialog extends Dialog {
             NbtLite.Compound item = (NbtLite.Compound) o;
             String id = item.string("ID");
             if (id == null) continue;
+            // NBT предмета мод держит отдельным тегом Tag (ForgeNameUtils
+            // .saveStackToNBT), а не внутри строки ID: внутри строки он его не
+            // прочтёт и подставит бедрок. Внутри редактора удобнее одна строка
+            NbtLite.Compound tag = item.comp("Tag");
+            if (tag != null) id = id + NbtLite.write(tag);
             int slot = item.i("Slot", -1);
             if (slot < 0 || slot >= slots.length) slot = fallback;
             while (slot < slots.length && slots[slot] != null) slot++;
@@ -397,9 +411,14 @@ public final class GiftDialog extends Dialog {
         items.indexed = true;
         for (int i = 0; i < slots.length; i++) {
             if (slots[i] == null) continue;
+            ForgeName fn = ForgeName.parse(slots[i]);
             NbtLite.Compound item = new NbtLite.Compound();
             item.put("Slot", NbtLite.Num.of(i, 'b'));
-            item.put("ID", slots[i]);
+            // ID — только имя и количество, NBT — отдельным тегом Tag: так его
+            // пишет и читает сам мод (ForgeNameUtils.saveStackToNBT)
+            item.put("ID", fn.id + "=" + (fn.hasCount ? fn.count : 1));
+            NbtLite.Compound tag = fn.nbt == null ? null : NbtLite.parse(fn.nbt);
+            if (tag != null) item.put("Tag", tag);
             items.add(item);
         }
         nbt.put("Items", items);

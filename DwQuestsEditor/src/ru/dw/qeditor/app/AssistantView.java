@@ -2,6 +2,7 @@ package ru.dw.qeditor.app;
 
 import ru.dw.qeditor.ai.ClaudeClient;
 import ru.dw.qeditor.ai.QuestPrompt;
+import ru.dw.qeditor.ai.TabShot;
 import ru.dw.qeditor.assets.Config;
 import ru.dw.qeditor.gui.Popup;
 import ru.dw.qeditor.gui.Theme;
@@ -9,6 +10,7 @@ import ru.dw.qeditor.gui.Ui;
 import ru.dw.qeditor.gui.Widgets;
 import ru.dw.qeditor.io.Backups;
 import ru.dw.qeditor.io.TabIO;
+import ru.dw.qeditor.io.TabPatch;
 import ru.dw.qeditor.model.Quest;
 import ru.dw.qeditor.model.QuestTab;
 
@@ -31,6 +33,14 @@ import java.util.Set;
 public final class AssistantView {
 
     private static final String[] MODELS = {"sonnet", "opus", "haiku"};
+    private static final QuestPrompt.Scope[] SCOPES = QuestPrompt.Scope.values();
+    private static final String[] SCOPE_NAMES = scopeNames();
+
+    private static String[] scopeNames() {
+        String[] out = new String[SCOPES.length];
+        for (int i = 0; i < SCOPES.length; i++) out[i] = SCOPES[i].ru;
+        return out;
+    }
 
     private final EditorModel model;
     private final ClaudeClient client = new ClaudeClient();
@@ -40,6 +50,12 @@ public final class AssistantView {
     private String log = "";
     private String status = " ";
     private int modelIndex;
+    /** Что отправлять из вкладки: по умолчанию — только выделенное. */
+    private int scopeIndex;
+    /** Прикладывать ли снимок вкладки: помощник увидит карту, а не только JSON. */
+    private boolean withShot;
+    /** Запрос, который ждёт снимка (его делают после кадра). */
+    private String queued;
 
     private QuestTab pending;
     private Thread worker;
@@ -76,8 +92,12 @@ public final class AssistantView {
         float bx = x;
         ui.textIn("Модель", bx, cy, 56, bh, Theme.TEXT_MUTED, Ui.LEFT, Theme.FONT_SMALL, false);
         bx += 58;
-        modelIndex = Widgets.dropdown(ui, popup, this + "model", bx, cy, 110, bh, MODELS, modelIndex);
-        bx += 118;
+        modelIndex = Widgets.dropdown(ui, popup, this + "model", bx, cy, 96, bh, MODELS, modelIndex);
+        bx += 102;
+        ui.textIn("Отправить", bx, cy, 70, bh, Theme.TEXT_MUTED, Ui.LEFT, Theme.FONT_SMALL, false);
+        bx += 70;
+        scopeIndex = Widgets.dropdown(ui, popup, this + "scope", bx, cy, 170, bh, SCOPE_NAMES, scopeIndex);
+        bx += 178;
         if (ui.button(bx, cy, 100, bh, "Отправить", Ui.PRIMARY, !busy && !request.trim().isEmpty())) send();
         bx += 104;
         if (ui.button(bx, cy, 86, bh, "Прервать", Ui.NORMAL, busy)) cancel();
@@ -87,7 +107,17 @@ public final class AssistantView {
         if (ui.button(bx, cy, 110, bh, "Проверить CLI", Ui.GHOST, !busy)) probe();
         bx += 114;
         if (ui.button(bx, cy, 86, bh, "Примеры", Ui.GHOST, true)) examples();
-        cy += bh + 10;
+        cy += bh + 6;
+
+        String shotLabel = "со снимком карты";
+        if (ui.checkbox(x, cy, shotLabel, withShot)) withShot = !withShot;
+        if (ui.over(x, cy, ui.checkboxWidth(shotLabel), 18))
+            ui.tooltip("К запросу приложится PNG вкладки — помощник увидит,\nкак она выглядит в игре");
+        // видно заранее, за что придётся платить
+        float tx = x + ui.checkboxWidth(shotLabel) + 20;
+        ui.textIn(size(ui.time()), tx, cy, Math.max(0, x + w - tx), 18,
+                Theme.TEXT_DISABLED, Ui.LEFT, Theme.FONT_SMALL, false);
+        cy += 24;
 
         Widgets.section(ui, "ОТВЕТ", x, cy, w);
         cy += 20;
@@ -147,15 +177,65 @@ public final class AssistantView {
         });
     }
 
+    private String sizeText = "";
+    private double sizeAt;
+
+    /**
+     * Во что обойдётся запрос: символы и грубая оценка в токенах. Считается не
+     * чаще раза в секунду — на «Вся вкладка» это сборка мегабайта JSON.
+     */
+    private String size(double now) {
+        if (sizeText.isEmpty() || now - sizeAt > 1.0) {
+            sizeAt = now;
+            int chars = prompt("").length();
+            sizeText = "В запрос уйдёт " + chars + " символов (примерно " + (chars / 3) + " токенов), "
+                    + "квестов во вкладке: " + model.tab().quests.size()
+                    + ", выделено: " + model.selection().size();
+        }
+        return sizeText;
+    }
+
+    private String prompt(String text) {
+        return QuestPrompt.build(model.tab(), SCOPES[scopeIndex], model.selection(), text);
+    }
+
     private void send() {
         String text = request.trim();
         if (text.isEmpty()) return;
+        if (withShot) {
+            // снимок рисуется тем же пакетом вершин, что и окно, поэтому не
+            // здесь, а после кадра — иначе кадр оборвётся на середине
+            queued = text;
+            status = "Готовлю снимок вкладки…";
+            busy = true;
+            return;
+        }
+        fire(text, null);
+    }
 
-        String prompt = QuestPrompt.build(model.tab(), text);
+    /**
+     * После кадра: если запрос ждал снимка вкладки, снимок делается сейчас и
+     * запрос уходит. Вызывается из {@code App.drawFrame} за пределами
+     * {@code batch.begin()/end()}.
+     */
+    public void afterBatch(ru.dw.qeditor.gl.Batch batch) {
+        if (queued == null) return;
+        String text = queued;
+        queued = null;
+        File dir = new File(System.getProperty("java.io.tmpdir"), "dwq-assistant");
+        File shot = TabShot.render(model.tab(), model.single(), batch, dir, 1280, 800);
+        if (shot != null) client.setWorkingDir(dir);
+        fire(text, shot);
+    }
+
+    private void fire(String text, File shot) {
+        String prompt = QuestPrompt.build(model.tab(), SCOPES[scopeIndex], model.selection(), text,
+                shot == null ? null : shot.getName());
         client.setExecutable(Config.get().claudeExe);
         client.setModel(MODELS[modelIndex]);
 
-        log = "Запрос отправлен (" + prompt.length() + " символов). Жду ответ…";
+        log = "Запрос отправлен (" + prompt.length() + " символов"
+                + (shot == null ? "" : " и снимок вкладки") + "). Жду ответ…";
         status = "Работает…";
         pending = null;
         busy = true;
@@ -211,9 +291,12 @@ public final class AssistantView {
             return;
         }
 
+        // ответ — патч с изменившимися квестами, а не вкладка целиком; целиком
+        // она приходит, только когда её просили создать с нуля
+        boolean whole = SCOPES[scopeIndex] == QuestPrompt.Scope.NONE;
         QuestTab candidate;
         try {
-            candidate = QuestTab.parse(json);
+            candidate = whole ? QuestTab.parse(json) : TabPatch.apply(model.tab(), json);
         } catch (RuntimeException e) {
             log += "\nJSON не разобрался: " + e.getMessage() + "\n\n" + json;
             status = "Ответ не похож на вкладку";

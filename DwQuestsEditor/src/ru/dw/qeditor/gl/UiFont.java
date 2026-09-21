@@ -32,6 +32,8 @@ public final class UiFont {
     public record Glyph(Atlas.Region region, float advance, float left, float top) { }
 
     private static final Map<String, UiFont> CACHE = new HashMap<>();
+    /** Шрифты для подстановки: ключ — имя, размер и начертание. */
+    private static final Map<String, Font> FALLBACKS = new HashMap<>();
     private static String family;
 
     private final Font font;
@@ -138,11 +140,17 @@ public final class UiFont {
     }
 
     private Glyph rasterize(char c) {
-        float advance = metrics.charWidth(c) / scale;
+        // Segoe UI знает не всё: крестик закрытия, дуги связей, знак внимания.
+        // Java для физического шрифта подстановку не делает сама — ищем сами,
+        // иначе на месте символа пустота
+        Font use = font.canDisplay(c) ? font : fallbackFor(c);
+        float advance = (use == font ? metrics.charWidth(c)
+                : (float) use.getStringBounds(String.valueOf(c), scratch.getFontRenderContext()).getWidth())
+                / scale;
         if (c == ' ' || Character.isISOControl(c)) return new Glyph(null, advance, 0, 0);
 
         String s = String.valueOf(c);
-        java.awt.geom.Rectangle2D bounds = font.createGlyphVector(
+        java.awt.geom.Rectangle2D bounds = use.createGlyphVector(
                 scratch.getFontRenderContext(), s).getPixelBounds(null, 0, 0);
         int w = (int) bounds.getWidth();
         int h = (int) bounds.getHeight();
@@ -154,13 +162,30 @@ public final class UiFont {
         java.awt.Graphics2D g2 = img.createGraphics();
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
-        g2.setFont(font);
+        g2.setFont(use);
         g2.setColor(java.awt.Color.WHITE);
         g2.drawString(s, (float) -bounds.getX() + 1, (float) -bounds.getY() + 1);
         g2.dispose();
 
         Atlas.Region r = atlas.add(img);
         return new Glyph(r, advance, ((float) bounds.getX() - 1) / scale, ((float) -bounds.getY() + 1) / scale);
+    }
+
+    /**
+     * Шрифт, которым рисовать символ, которого нет в основном.
+     *
+     * <p>Список — от «тот же по духу» к «лишь бы нарисовалось»; логический
+     * Dialog идёт последним: он составной, и подстановку по всем системным
+     * шрифтам делает уже сам.
+     */
+    private Font fallbackFor(char c) {
+        for (String name : new String[]{
+                "Segoe UI Symbol", "Segoe UI Emoji", "Arial Unicode MS", "DejaVu Sans", "Dialog"}) {
+            Font f = FALLBACKS.computeIfAbsent(name + '/' + font.getSize() + '/' + font.getStyle(),
+                    k -> new Font(name, font.getStyle(), font.getSize()));
+            if (f.canDisplay(c)) return f;
+        }
+        return font;
     }
 
     /** Атлас мог пополниться — вызывается раз в кадр. */

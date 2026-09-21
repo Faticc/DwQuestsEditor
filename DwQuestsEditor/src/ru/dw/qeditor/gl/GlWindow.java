@@ -171,7 +171,22 @@ public final class GlWindow {
         return s == null ? "" : s;
     }
 
-    public void setClipboard(String s) { glfwSetClipboardString(handle, s == null ? "" : s); }
+    /**
+     * Положить текст в буфер обмена.
+     *
+     * <p>Строка кодируется в свою память, а не в стек LWJGL: у
+     * {@code glfwSetClipboardString(long, CharSequence)} она уходит в
+     * {@code MemoryStack} на 64 КБ, и вкладка целиком («копировать для
+     * /dwq tab paste») роняла редактор с {@code Out of stack space}.
+     */
+    public void setClipboard(String s) {
+        java.nio.ByteBuffer utf8 = org.lwjgl.system.MemoryUtil.memUTF8(s == null ? "" : s, true);
+        try {
+            org.lwjgl.glfw.GLFW.nglfwSetClipboardString(handle, org.lwjgl.system.MemoryUtil.memAddress(utf8));
+        } finally {
+            org.lwjgl.system.MemoryUtil.memFree(utf8);
+        }
+    }
 
     /** Курсор ставится раз в кадр: смена курсора в GLFW не бесплатна. */
     public void cursor(int cursor) { wantCursor = cursor; }

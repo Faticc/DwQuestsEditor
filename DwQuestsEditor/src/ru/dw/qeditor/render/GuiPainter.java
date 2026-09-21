@@ -108,6 +108,18 @@ public final class GuiPainter implements McFont.Sink {
         transY += y * scaleY;
     }
 
+    /**
+     * Прижать начало координат к целому пикселю экрана.
+     *
+     * <p>Нужно «пиксельному» выводу: шрифт и текстуры мода рисуются
+     * GL_NEAREST, и полпикселя сдвига размазывают их по соседним — буквы
+     * получаются разной толщины.
+     */
+    public void snap() {
+        transX = Math.round(transX);
+        transY = Math.round(transY);
+    }
+
     public void scale(float s) { scale(s, s); }
 
     public void scale(float sx, float sy) {

@@ -53,7 +53,8 @@ public abstract class Dialog {
         float titleH = 40;
         ui.text(title, x + 16, y + (titleH - ui.font(Theme.FONT_LARGE, true).height()) / 2,
                 Theme.TEXT, Theme.FONT_LARGE, true);
-        if (ui.button(x + w - 34, y + 8, 26, 24, "✕", Ui.GHOST, true)) close();
+        // крестик узкой кнопке не влезал и подменялся многоточием
+        if (ui.button(x + w - 40, y + 8, 32, 24, "✕", Ui.GHOST, true)) close();
         ui.hSeparator(x, y + titleH, w);
 
         content(ui, x + 16, y + titleH + 12, w - 32, h - titleH - 24);

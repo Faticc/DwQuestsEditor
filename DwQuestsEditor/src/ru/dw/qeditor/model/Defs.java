@@ -135,8 +135,10 @@ public final class Defs {
 
     /** Parent.LineType */
     public enum LineType {
-        DEFAULT("Дуга ︵"),
-        INVERTED("Дуга ︶"),
+        // символы дуги — из тех, что есть в системных шрифтах: ︵ и ︶
+        // (вертикальные формы) не рисовались вовсе
+        DEFAULT("Дуга ◠"),
+        INVERTED("Дуга ◡"),
         STRAIGHT("Прямая ━");
 
         public final String ru;

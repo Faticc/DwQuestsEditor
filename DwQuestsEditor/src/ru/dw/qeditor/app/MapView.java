@@ -71,7 +71,8 @@ public final class MapView {
     private float camY;
     private float zoom = 1f;
 
-    private int gridSize = 1;
+    /** Шаг сетки в клетках; дробный шаг нужен для плотных веток (0.5, 0.25). */
+    private float gridSize = 1;
     private float gridOffsetX;
     private float gridOffsetY;
     private boolean showGrid = true;
@@ -90,8 +91,17 @@ public final class MapView {
     /** Границы видимой области в координатах мира — считаются раз на кадр. */
     private float viewLeft, viewTop, viewRight, viewBottom;
 
+    /**
+     * Насколько надо увести курсор, чтобы нажатие стало перетаскиванием.
+     * Без этого щелчок по квесту уже сдвигал его: первый же кадр притягивал
+     * узел к сетке.
+     */
+    private static final float DRAG_SLOP = 4f;
+
     // жесты
     private boolean dragNodes;
+    /** Кнопку нажали на узле, но порог сдвига ещё не пройден. */
+    private boolean dragPending;
     private boolean panning;
     private boolean rubber;
     private String linkFrom;
@@ -118,9 +128,12 @@ public final class MapView {
 
     // ------------------------------------------------------------------ настройки
 
-    public int getGridSize() { return gridSize; }
+    public float getGridSize() { return gridSize; }
 
-    public void setGridSize(int gridSize) { this.gridSize = Math.max(1, gridSize); }
+    /** Шаг мельче 1/16 клетки бессмыслен: в игре координата — это 24 пикселя. */
+    public void setGridSize(float gridSize) {
+        this.gridSize = Math.max(0.0625f, Math.min(16f, gridSize));
+    }
 
     public void setGridOffset(float x, float y) { gridOffsetX = x; gridOffsetY = y; }
 
@@ -502,6 +515,25 @@ public final class MapView {
             }
             return;
         }
+        if (dragPending) {
+            if (!in.leftDown()) {
+                dragPending = false;
+            } else if (Math.abs(lx - pressX) > DRAG_SLOP || Math.abs(ly - pressY) > DRAG_SLOP) {
+                dragPending = false;
+                dragNodes = true;
+                // снимок делается здесь, а не при нажатии: на тысяче квестов
+                // сериализация вкладки на каждый щелчок заметна
+                dragBeforeJson = model.tab().toJsonString();
+                dragOrigin.clear();
+                for (String id : model.selection()) {
+                    Quest q = model.tab().quests.get(id);
+                    if (q != null) dragOrigin.put(id, new float[]{q.displayX, q.displayY});
+                }
+            } else {
+                ui.cursor(GlWindow.CURSOR_HAND);
+                return;
+            }
+        }
         if (dragNodes) {
             dragTo(wx, wy);
             if (!in.leftDown()) {
@@ -570,15 +602,9 @@ public final class MapView {
                 if (in.ctrl()) model.toggleSelect(hit);
                 else if (!model.selection().contains(hit)) model.select(hit);
 
-                if (model.selection().contains(hit)) {
-                    dragNodes = true;
-                    dragBeforeJson = model.tab().toJsonString();
-                    dragOrigin.clear();
-                    for (String id : model.selection()) {
-                        Quest q = model.tab().quests.get(id);
-                        if (q != null) dragOrigin.put(id, new float[]{q.displayX, q.displayY});
-                    }
-                }
+                // сам сдвиг начнётся, только если курсор уведут: щелчок по
+                // квесту должен его выделять, а не двигать
+                if (model.selection().contains(hit)) dragPending = true;
             } else {
                 if (!in.ctrl()) model.clearSelection();
                 rubber = true;

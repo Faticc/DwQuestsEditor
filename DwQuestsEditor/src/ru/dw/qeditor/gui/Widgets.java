@@ -113,7 +113,10 @@ public final class Widgets {
                 List<Popup.Item> entries = new ArrayList<>();
                 for (int i = 0; i < items.length; i++)
                     entries.add(i == selected ? Popup.Item.check(items[i], true) : Popup.Item.of(items[i]));
-                popup.open(id, x, y + h + 2, entries, w);
+                // список рисуется верхним слоем с чистым началом координат,
+                // а поле может стоять внутри прокручиваемой области
+                popup.open(id, ui.toScreenX(x), ui.toScreenY(y + h + 2), ui.toScreenY(y - 2),
+                        entries, w);
             }
         }
         return selected;

@@ -162,6 +162,9 @@ public final class Sidebar {
         if (iconButton(ui, tab.iconItem, x + labelW, cy, row))
             openDialog.accept(ItemPicker.open(tab.iconItem,
                     s -> model.edit("Иконка вкладки", () -> tab.iconItem = s)));
+        if (iconNbtRequested(ui, x + labelW, cy, row))
+            openDialog.accept(NbtItemDialog.edit(tab.iconItem,
+                    s -> model.edit("Иконка вкладки", () -> tab.iconItem = s), openDialog));
         label(ui, "sortIndex", x + labelW + row + 16, cy, 70, row);
         int sort = ui.intField(this + "sort", x + labelW + row + 90, cy, 80, row, tab.sortIndex, -999, 999);
         if (sort != tab.sortIndex) model.edit("sortIndex вкладки", () -> tab.sortIndex = sort);
@@ -207,6 +210,9 @@ public final class Sidebar {
         if (iconButton(ui, q.iconItem, px, cy, row))
             openDialog.accept(ItemPicker.open(q.iconItem,
                     s -> model.edit("Иконка квеста", () -> q.iconItem = s)));
+        if (iconNbtRequested(ui, px, cy, row))
+            openDialog.accept(NbtItemDialog.edit(q.iconItem,
+                    s -> model.edit("Иконка квеста", () -> q.iconItem = s), openDialog));
         px += row + 10;
         float numW = Math.max(60, (w - labelW - row - 34) / 2);
         label(ui, "X", px, cy, 12, row);
@@ -274,9 +280,15 @@ public final class Sidebar {
         Icons.item(ui, item, x + (size - 20) / 2, y + (size - 20) / 2, 20);
         if (hovered) {
             ui.cursor(GlWindow.CURSOR_HAND);
-            ui.tooltip(ItemRegistry.get().displayName(item) + "\n" + item);
+            ui.tooltip(ItemRegistry.get().displayName(item) + "\n" + item
+                    + "\nЛКМ — выбрать предмет, ПКМ — NBT: имя, лор, зачарования");
         }
         return hovered && ui.in().leftPressed();
+    }
+
+    /** Правая кнопка по иконке — редактор NBT: иконке он тоже бывает нужен. */
+    private boolean iconNbtRequested(Ui ui, float x, float y, float size) {
+        return ui.over(x, y, size, size) && ui.in().rightPressed();
     }
 
     // ------------------------------------------------------------------ описание
@@ -428,10 +440,15 @@ public final class Sidebar {
         float content = ids.size() * rowH;
         float fieldW = innerW - Theme.SCROLLBAR - 6;
 
+        // номер задачи меняется после кадра: правка на каждое нажатие клавиши
+        // перестраивала бы таблицу прямо посреди её отрисовки
+        int[] rename = null;
+
         float[] scroll = ui.beginScroll(scrollId, x + 1, y + headH + 1, innerW, viewH, innerW, content);
         for (int r = 0; r < ids.size(); r++) {
             int id = ids.get(r);
             Task t = q.tasks.get(id);
+            if (t == null) continue;
             float ry = r * rowH;
             if (ry + rowH < scroll[1] || ry > scroll[1] + viewH) continue;
 
@@ -445,8 +462,10 @@ public final class Sidebar {
             float cy = ry + 3;
             float numW = 46;
             float countW = 62;
-            int newID = ui.intField(this + "tid" + id, 3, cy, numW, line, id, -999, 9999);
-            if (newID != id) retaskID(q, id, newID);
+            // ключ поля — по строке таблицы, а не по номеру задачи: иначе
+            // первая же набранная цифра меняет ключ и поле теряет фокус
+            int newID = ui.intField(this + "tid#" + r, 3, cy, numW, line, id, 0, 9999);
+            if (newID != id) rename = new int[]{id, newID};
 
             float typeW = fieldW - numW - countW - 12;
             int type = Widgets.dropdown(ui, popup, this + "ttype" + id, numW + 9, cy, typeW, line,
@@ -467,7 +486,12 @@ public final class Sidebar {
 
             float sx = 3;
             if (!kill && !subject.isEmpty()) {
-                Icons.item(ui, subject, sx, cy + (line - 18) / 2f, 18);
+                float iy = cy + (line - 18) / 2f;
+                Icons.item(ui, subject, sx, iy, 18);
+                if (ui.over(sx, iy, 18, 18)) ui.tooltip("ПКМ — NBT предмета задачи");
+                if (iconNbtRequested(ui, sx, iy, 18))
+                    openDialog.accept(NbtItemDialog.edit(subject,
+                            s -> model.edit("Предмет задачи", () -> t.forgeName = s), openDialog));
                 sx += 21;
             }
             String newSubject = ui.field(this + "tsub" + id, sx, cy, half - (sx - 3), line, subject,
@@ -503,10 +527,14 @@ public final class Sidebar {
         }
         ui.endScroll(scrollId, x + 1, y + headH + 1, innerW, viewH, innerW, content);
 
+        if (rename != null) retaskID(q, rename[0], rename[1]);
+
         if (taskRow >= 0 && taskRow < ids.size()) {
             Task t = q.tasks.get(ids.get(taskRow));
-            hint("В игре: " + t.description(ItemLook.name(t.forgeName))
-                    + (t.type.serverSupported() ? "" : "   ⚠ тип не отслеживается сервером"));
+            // задачи под строкой может уже не быть: номер меняли в этом же кадре
+            if (t != null)
+                hint("В игре: " + t.description(ItemLook.name(t.forgeName))
+                        + (t.type.serverSupported() ? "" : "   ⚠ тип не отслеживается сервером"));
         }
     }
 
@@ -548,7 +576,11 @@ public final class Sidebar {
 
     /** Сменить номер задачи, поправив ссылки на неё в остальных. */
     private void retaskID(Quest q, int id, int newID) {
-        if (q == null || newID == id || q.tasks.containsKey(newID)) return;
+        if (q == null || newID == id) return;
+        if (q.tasks.containsKey(newID)) {
+            hint("Задача с номером " + newID + " уже есть");
+            return;
+        }
         model.edit("Номер задачи", () -> {
             LinkedHashMap<Integer, Task> copy = new LinkedHashMap<>(q.tasks);
             q.tasks.clear();
