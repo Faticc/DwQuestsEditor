@@ -164,7 +164,13 @@ public final class NbtLite {
             i++; // кавычка
             while (i < s.length()) {
                 char c = s.charAt(i++);
-                if (c == '\\' && i < s.length()) { sb.append(s.charAt(i++)); continue; }
+                // JsonToNBT 1.7.10 снимает экранирование только с \" и \\, прочие
+                // обратные слэши остаются: «\n» в лоре гифта — это два символа,
+                // перенос из них делает сам мод. Съев слэш, мы склеивали строки лора
+                if (c == '\\' && i < s.length() && (s.charAt(i) == q || s.charAt(i) == '\\')) {
+                    sb.append(s.charAt(i++));
+                    continue;
+                }
                 if (c == q) return sb.toString();
                 sb.append(c);
             }
@@ -194,14 +200,18 @@ public final class NbtLite {
         static boolean isNumeric(String t) {
             if (t.isEmpty()) return false;
             boolean digit = false;
+            boolean exp = false;
             for (int k = 0; k < t.length(); k++) {
                 char c = t.charAt(k);
                 if (c >= '0' && c <= '9') { digit = true; continue; }
-                if ((c == '-' || c == '+') && k == 0) continue;
-                if (c == '.') continue;
+                if ((c == '-' || c == '+') && (k == 0 || exp && (t.charAt(k - 1) == 'e' || t.charAt(k - 1) == 'E')))
+                    continue;
+                if (c == '.' && !exp) continue;
+                // 1.0E7d — так игра печатает большие double (заряд брони в пакетах)
+                if ((c == 'e' || c == 'E') && digit && !exp && k + 1 < t.length()) { exp = true; continue; }
                 return false;
             }
-            return digit;
+            return digit && !(t.endsWith("e") || t.endsWith("E") || t.endsWith("+") || t.endsWith("-"));
         }
     }
 
@@ -251,8 +261,25 @@ public final class NbtLite {
         return simple ? k : "\"" + escape(k) + "\"";
     }
 
+    /**
+     * Обратное к {@code quoted}: слэш удваивается, только если иначе его прочтут
+     * как экранирование (перед кавычкой, слэшем или в конце строки). Так «\n»
+     * пишется как было и файл не меняется на ровном месте.
+     */
     private static String escape(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int k = 0; k < s.length(); k++) {
+            char c = s.charAt(k);
+            if (c == '"') {
+                sb.append("\\\"");
+            } else if (c == '\\') {
+                char next = k + 1 < s.length() ? s.charAt(k + 1) : 0;
+                sb.append(next == '"' || next == '\\' || next == 0 ? "\\\\" : "\\");
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     // --------------------------------------------------------- удобные выборки

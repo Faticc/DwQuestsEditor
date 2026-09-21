@@ -2,6 +2,7 @@ package ru.dw.qeditor.app;
 
 import ru.dw.qeditor.assets.ItemLook;
 import ru.dw.qeditor.assets.ItemRegistry;
+import ru.dw.qeditor.assets.PlasticBag;
 import ru.dw.qeditor.gl.GlWindow;
 import ru.dw.qeditor.gui.Popup;
 import ru.dw.qeditor.gui.Theme;
@@ -63,7 +64,7 @@ public final class Sidebar {
     }
 
     /** Награда: предмет, команда, гифт или скрипт — тип виден по самой строке. */
-    public enum Kind { ITEM, COMMAND, GIFT, SCRIPT }
+    public enum Kind { ITEM, COMMAND, GIFT, SCRIPT, BAG }
 
     private final EditorModel model;
     private final Popup popup;
@@ -699,6 +700,7 @@ public final class Sidebar {
         if (fn.isCommand()) return Kind.COMMAND;
         if (ru.dw.qeditor.assets.Gifts.isGift(reward)) return Kind.GIFT;
         if (fn.isScript()) return Kind.SCRIPT;
+        if (PlasticBag.isBag(reward)) return Kind.BAG;
         return Kind.ITEM;
     }
 
@@ -750,6 +752,10 @@ public final class Sidebar {
         rewardButton(ui, "Вставить", bx, by, 80, bh, !model.selection().isEmpty(),
                 () -> pasteParts(ui, "rewards"));
         if (ui.over(bx, by, 80, bh)) ui.tooltip("В конец наград всех выделенных квестов");
+        bx += 84;
+        rewardButton(ui, "Пакет…", bx, by, 68, bh, q != null, () ->
+                openDialog.accept(BagDialog.edit(null, s -> addReward(q, s), openDialog)));
+        if (ui.over(bx, by, 68, bh)) ui.tooltip("Пластиковый пакет MFR: пять слотов с чем угодно, хоть с гифтами");
 
         float ly = by + bh + 8;
         drawRewardList(ui, q, rewards, x, ly, w, Math.max(60, y + h - ly));
@@ -787,7 +793,8 @@ public final class Sidebar {
                 text = "Команда: " + s.substring("command:".length());
             } else {
                 Icons.item(ui, s, 5, ry + 3, 20);
-                String tag = kind == Kind.GIFT ? " [гифт]" : kind == Kind.SCRIPT ? " [скрипт]" : "";
+                String tag = kind == Kind.GIFT ? " [гифт]" : kind == Kind.SCRIPT ? " [скрипт]"
+                        : kind == Kind.BAG ? " [пакет: " + PlasticBag.items(s).size() + "/" + PlasticBag.SLOTS + "]" : "";
                 text = ItemLook.name(s) + " × " + ItemLook.count(s) + tag;
             }
             ui.textIn(text, 30, ry, innerW - 40, rowH,
@@ -795,7 +802,7 @@ public final class Sidebar {
 
             if (hovered) {
                 ui.cursor(GlWindow.CURSOR_HAND);
-                ui.tooltip(s);
+                ui.tooltip(kind == Kind.BAG ? bagTooltip(s) : s);
                 if (ui.in().leftPressed()) rewardRow = i;
                 if (ui.in().doubleClick()) {
                     rewardRow = i;
@@ -804,6 +811,19 @@ public final class Sidebar {
             }
         }
         ui.endScroll(id, x + 1, y + 1, innerW, h - 2, innerW, content);
+    }
+
+    /** Сырая строка пакета с гифтом внутри — на экран не влезает; показываем содержимое. */
+    private static String bagTooltip(String reward) {
+        StringBuilder sb = new StringBuilder("Пластиковый пакет:");
+        String[] slots = PlasticBag.slots(reward);
+        for (int k = 0; k < slots.length; k++) {
+            sb.append("\n").append(k + 1).append(". ");
+            if (slots[k] == null) sb.append("пусто");
+            else sb.append(ItemLook.name(slots[k])).append(" × ").append(ItemLook.count(slots[k]))
+                    .append(ru.dw.qeditor.assets.Gifts.isGift(slots[k]) ? " [гифт]" : "");
+        }
+        return sb.append("\nДвойной щелчок — открыть").toString();
     }
 
     private void addReward(Quest q, String s) {
@@ -822,6 +842,7 @@ public final class Sidebar {
         String current = q.rewards.get(i);
         switch (kindOf(current)) {
             case GIFT -> openDialog.accept(GiftDialog.edit(current, s -> setReward(q, i, s), openDialog));
+            case BAG -> openDialog.accept(BagDialog.edit(current, s -> setReward(q, i, s), openDialog));
             case COMMAND -> askCommand(q, i);
             case SCRIPT -> openDialog.accept(
                     NbtItemDialog.editScript(current, s -> setReward(q, i, s), openDialog));

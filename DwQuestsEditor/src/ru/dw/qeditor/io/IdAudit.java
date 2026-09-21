@@ -1,6 +1,7 @@
 package ru.dw.qeditor.io;
 
 import ru.dw.qeditor.assets.Gifts;
+import ru.dw.qeditor.assets.PlasticBag;
 import ru.dw.qeditor.assets.ItemRegistry;
 import ru.dw.qeditor.assets.NbtLite;
 import ru.dw.qeditor.model.Quest;
@@ -80,9 +81,21 @@ public final class IdAudit {
                 String where = q.questID + ": награда " + (i + 1);
                 add(out, reward, where);
                 if (Gifts.isGift(reward)) addGiftItems(out, reward, where);
+                if (PlasticBag.isBag(reward)) addBagItems(out, reward, where);
             }
         }
         return out;
+    }
+
+    /** Содержимое пластикового пакета MFR; гифты в нём проверяются вглубь. */
+    private static void addBagItems(List<Use> out, String reward, String where) {
+        int n = 0;
+        for (String item : PlasticBag.items(reward)) {
+            n++;
+            String inside = where + " → пакет, предмет " + n;
+            add(out, item, inside);
+            if (Gifts.isGift(item)) addGiftItems(out, item, inside);
+        }
     }
 
     /** Содержимое гифта: слоты лежат в NBT как ID + отдельный Tag. */

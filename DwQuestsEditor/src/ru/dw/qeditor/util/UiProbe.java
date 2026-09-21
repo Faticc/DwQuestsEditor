@@ -42,6 +42,9 @@ public final class UiProbe {
             // -Ddwq.probe.changes=другая.json — окно изменений: будто вкладку отредактировали до неё
             String changes = System.getProperty("dwq.probe.changes");
             if (changes != null) app.probeChanges(new File(changes));
+            // -Ddwq.probe.bag=questID — окно пластикового пакета из наград этого квеста
+            String bag = System.getProperty("dwq.probe.bag");
+            if (bag != null) app.probeBag(bag);
 
             BufferedImage img = probe.frameSelf(app::drawFrame);
             if (img.getWidth() != width || img.getHeight() != height)

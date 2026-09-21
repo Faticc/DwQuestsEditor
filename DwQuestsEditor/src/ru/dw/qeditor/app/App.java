@@ -1369,6 +1369,19 @@ public final class App {
 
     /** Открыть файл из кода — запуск с аргументом и отладочные проверки. */
     /** Для UiProbe: подменить содержимое, не трогая файл, и показать отличия. */
+    /** Для UiProbe: выделить квест и открыть окно его пластикового пакета. */
+    public void probeBag(String questID) {
+        model.select(questID);
+        Quest q = model.selectedQuest();
+        if (q == null) return;
+        for (String r : q.rewards) {
+            if (ru.dw.qeditor.assets.PlasticBag.isBag(r)) {
+                open(BagDialog.edit(r, s -> { }, this::open));
+                return;
+            }
+        }
+    }
+
     public void probeChanges(File edited) throws Exception {
         model.setTab(TabIO.load(edited), model.file(), true);
         showChanges();
