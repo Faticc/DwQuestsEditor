@@ -284,6 +284,8 @@ public class GamePreview {
 
     /** Идёт отрисовка плаката: без наведения, подписей и рамки окна. */
     private boolean poster;
+    /** Фаза колыхания связей на плакате — у анимации свой период, см. {@link TabPoster}. */
+    private float posterLinkTick;
 
     /**
      * Границы содержимого вкладки в пикселях GUI карты — {левый, верхний,
@@ -317,9 +319,23 @@ public class GamePreview {
      * @param mapX левый край плаката в координатах карты (см. {@link #posterBounds})
      */
     public void renderPoster(GuiPainter p, float mapX, float mapY, int width, int height) {
+        renderPoster(p, mapX, mapY, width, height, tick, tick);
+    }
+
+    /**
+     * То же для кадра анимации.
+     *
+     * @param frameTick кадр анимации узлов (32 кадра на круг)
+     * @param linkTick  фаза колыхания связей (sin(t / 8), круг — 16π)
+     */
+    public void renderPoster(GuiPainter p, float mapX, float mapY, int width, int height,
+                             int frameTick, float linkTick) {
         float keepZoom = zoomFactor, keepX = guiMapX, keepY = guiMapY;
         boolean keepInit = mapInitialized;
+        int keepTick = tick;
         poster = true;
+        tick = frameTick;
+        posterLinkTick = linkTick;
         try {
             bx = 0;
             by = 0;
@@ -337,6 +353,7 @@ public class GamePreview {
             drawQuestButtons(p, false);
         } finally {
             poster = false;
+            tick = keepTick;
             zoomFactor = keepZoom;
             guiMapX = keepX;
             guiMapY = keepY;
@@ -603,7 +620,7 @@ public class GamePreview {
                 int color = lineShine ? Defs.Star.of(q.rarity).mainColor : -13421773;
                 int parentColor = lineShine ? Defs.Star.of(pq.rarity).mainColor : -5592406;
                 LinkRenderer.line(p, x1, y1, x2, y2, color, parentColor, lineShine,
-                        parent.lineType, tick, deviceWidth, gradient);
+                        parent.lineType, poster ? posterLinkTick : tick, deviceWidth, gradient);
             }
         }
     }

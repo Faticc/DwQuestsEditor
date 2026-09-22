@@ -8,6 +8,7 @@ import java.io.File;
 
 /**
  * Картинка всей вкладки без окна — то же, что «Файл → Сохранить картинку вкладки».
+ * Если имя кончается на .gif — анимация, как «Сохранить анимацию вкладки».
  * Запуск: java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.PosterProbe вкладка.json out.png [масштаб]
  */
 public final class PosterProbe {
@@ -24,7 +25,10 @@ public final class PosterProbe {
         gp.setSingleTab(TabIO.load(new File(args[0])));
         try (GlProbe probe = GlProbe.open()) {
             long start = System.nanoTime();
-            TabPoster.Result r = TabPoster.render(gp, probe.batch(), new File(args[1]), scale);
+            File out = new File(args[1]);
+            TabPoster.Result r = out.getName().toLowerCase().endsWith(".gif")
+                    ? TabPoster.renderGif(gp, probe.batch(), out, scale)
+                    : TabPoster.render(gp, probe.batch(), out, scale);
             System.out.printf("%s: %d × %d, ×%.2f, %.1f с%n", r.file(), r.width(), r.height(), r.scale(),
                     (System.nanoTime() - start) / 1e9);
         }

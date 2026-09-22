@@ -42,15 +42,22 @@ public final class FileDialogs {
     }
 
     public static File savePng(String title, File suggested) {
+        return saveAs(title, suggested, "png", "Картинка PNG (*.png)");
+    }
+
+    public static File saveGif(String title, File suggested) {
+        return saveAs(title, suggested, "gif", "Анимация GIF (*.gif)");
+    }
+
+    private static File saveAs(String title, File suggested, String ext, String description) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             PointerBuffer filters = stack.mallocPointer(1);
-            filters.put(stack.UTF8("*.png"));
+            filters.put(stack.UTF8("*." + ext));
             filters.flip();
             String path = TinyFileDialogs.tinyfd_saveFileDialog(
-                    title, suggested == null ? "" : suggested.getAbsolutePath(),
-                    filters, "Картинка PNG (*.png)");
+                    title, suggested == null ? "" : suggested.getAbsolutePath(), filters, description);
             if (path == null) return null;
-            if (!path.toLowerCase().endsWith(".png")) path = path + ".png";
+            if (!path.toLowerCase().endsWith("." + ext)) path = path + "." + ext;
             return new File(path);
         }
     }

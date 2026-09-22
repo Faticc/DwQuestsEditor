@@ -463,7 +463,8 @@ public final class App {
                 item(items, actions, "Вставить вкладку из буфера", null, this::pasteTab);
                 item(items, actions, "Копировать вкладку в буфер", null, this::copyTab);
                 item(items, actions, "Копировать для /dwq tab paste", null, this::copyTabCompact);
-                item(items, actions, "Сохранить картинку вкладки…", null, this::savePoster);
+                item(items, actions, "Сохранить картинку вкладки…", null, () -> savePoster(false));
+                item(items, actions, "Сохранить анимацию вкладки (GIF)…", null, () -> savePoster(true));
                 separator(items, actions);
                 item(items, actions, "Перечитать файл", null, this::reloadFile);
                 separator(items, actions);
@@ -980,26 +981,34 @@ public final class App {
         status("Компактный JSON скопирован — можно вставлять в /dwq tab paste");
     }
 
-    /** Плакат, ждущий отрисовки после кадра окна: файл и масштаб. */
+    /** Плакат, ждущий отрисовки после кадра окна: файл, масштаб и GIF ли это. */
     private File posterFile;
     private float posterScale;
+    private boolean posterGif;
     /** Пропустить кадр, чтобы строка «Рисую…» успела показаться до долгой отрисовки. */
     private boolean posterWait;
 
-    /** Вся карта вкладки одной картинкой: сначала качество, затем куда сохранить. */
-    private void savePoster() {
+    /**
+     * Вся карта вкладки одной картинкой или анимацией: сначала качество,
+     * затем куда сохранить.
+     */
+    private void savePoster(boolean gif) {
         if (model.tab().quests.isEmpty()) {
             status("Во вкладке нет квестов — рисовать нечего");
             return;
         }
         GamePreview gp = posterPreview();
-        float[] scales = {2f, 3f, 4f};
-        StringBuilder text = new StringBuilder("Вся карта вкладки одной картинкой, как в игре, без рамки окна.\n\n");
+        float[] scales = gif ? new float[]{1f, 2f} : new float[]{2f, 3f, 4f};
+        StringBuilder text = new StringBuilder(gif
+                ? "Вся карта вкладки анимацией, как в игре, без рамки окна: "
+                  + TabPoster.GIF_FRAMES + " кадров по кругу, 3,2 с.\n"
+                  + "В GIF 256 цветов и не больше " + TabPoster.GIF_MAX_SIDE + " точек по стороне.\n\n"
+                : "Вся карта вкладки одной картинкой, как в игре, без рамки окна.\n\n");
         String[] buttons = new String[scales.length + 1];
         buttons[0] = "Отмена";
         float[] b = gp.posterBounds();
         for (int i = 0; i < scales.length; i++) {
-            float s = TabPoster.fitScale(gp, scales[i]);
+            float s = gif ? TabPoster.fitGifScale(gp, scales[i]) : TabPoster.fitScale(gp, scales[i]);
             int w = Math.round((b[2] - b[0]) * s), h = Math.round((b[3] - b[1]) * s);
             buttons[i + 1] = "×" + (int) scales[i];
             text.append("×").append((int) scales[i]).append(" — ").append(w).append(" × ").append(h);
@@ -1008,17 +1017,20 @@ public final class App {
             if (scales[i] == 4f) text.append(", иконки в родных 64×64");
             text.append('\n');
         }
-        open(Dialogs.confirm("Картинка вкладки", text.toString(), buttons, answer -> {
+        String ext = gif ? ".gif" : ".png";
+        open(Dialogs.confirm(gif ? "Анимация вкладки" : "Картинка вкладки", text.toString(), buttons, answer -> {
             if (answer < 1) return;
             File dir = model.file() != null ? model.file().getParentFile() : lastDir();
             File suggested = new File(dir == null ? new File(".") : dir,
-                    (model.tab().tabID == null ? "вкладка" : model.tab().tabID) + ".png");
-            File f = FileDialogs.savePng("Сохранить картинку вкладки", suggested);
+                    (model.tab().tabID == null ? "вкладка" : model.tab().tabID) + ext);
+            File f = gif ? FileDialogs.saveGif("Сохранить анимацию вкладки", suggested)
+                    : FileDialogs.savePng("Сохранить картинку вкладки", suggested);
             if (f == null) return;
             posterFile = f;
             posterScale = scales[answer - 1];
+            posterGif = gif;
             posterWait = true;
-            status("Рисую картинку вкладки…");
+            status(gif ? "Рисую анимацию вкладки…" : "Рисую картинку вкладки…");
         }));
     }
 
@@ -1042,8 +1054,10 @@ public final class App {
         posterFile = null;
         long start = System.nanoTime();
         try {
-            TabPoster.Result r = TabPoster.render(posterPreview(), batch, f, posterScale);
-            status(String.format("Картинка сохранена: %s, %d × %d, ×%s за %.1f с", f.getName(),
+            TabPoster.Result r = posterGif
+                    ? TabPoster.renderGif(posterPreview(), batch, f, posterScale)
+                    : TabPoster.render(posterPreview(), batch, f, posterScale);
+            status(String.format((posterGif ? "Анимация" : "Картинка") + " сохранена: %s, %d × %d, ×%s за %.1f с", f.getName(),
                     r.width(), r.height(), r.scale() == (int) r.scale() ? String.valueOf((int) r.scale())
                             : String.format("%.2f", r.scale()), (System.nanoTime() - start) / 1e9));
         } catch (OutOfMemoryError e) {
