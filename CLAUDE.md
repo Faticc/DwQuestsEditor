@@ -336,6 +336,10 @@ java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.UiProbe ui.png в�
 java -Dfile.encoding=UTF-8 -cp "out;lib/*" ru.dw.qeditor.util.UiProbe ui.png вкладка.json 1 1920 1080 full
 ```
 
+Картинка всей вкладки («Файл → Сохранить картинку вкладки…», `render/TabPoster`):
+карта без рамки окна, кусками по 2040 точек в кадровый буфер и склейкой в памяти —
+текстура больше 16 384 не создаётся. Без окна: `util.PosterProbe вкладка.json out.png 4`.
+
 С `-Ddwq.probe.changes=другая.json` `UiProbe` подменяет содержимое вкладки и снимает
 окно несохранённых изменений.
 

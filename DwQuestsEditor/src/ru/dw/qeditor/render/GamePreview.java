@@ -280,6 +280,107 @@ public class GamePreview {
         }
     }
 
+    // ------------------------------------------------------------------ плакат
+
+    /** Идёт отрисовка плаката: без наведения, подписей и рамки окна. */
+    private boolean poster;
+
+    /**
+     * Границы содержимого вкладки в пикселях GUI карты — {левый, верхний,
+     * правый, нижний}, с запасом на свечение самого крупного узла.
+     */
+    public float[] posterBounds() {
+        float l = Float.MAX_VALUE, t = Float.MAX_VALUE, r = -Float.MAX_VALUE, b = -Float.MAX_VALUE;
+        if (tab != null) {
+            for (Quest q : tab.quests.values()) {
+                float cx = q.displayX * CELL + NODE_SIZE / 2f;
+                float cy = q.displayY * CELL + NODE_SIZE / 2f;
+                // кадр узла — 64 точки на масштабе 1 (questStar), свечение до края кадра
+                float half = 32f * q.iconSize.scale;
+                l = Math.min(l, cx - half);
+                t = Math.min(t, cy - half);
+                r = Math.max(r, cx + half);
+                b = Math.max(b, cy + half);
+            }
+        }
+        if (l > r) return new float[]{0, 0, CELL, CELL};
+        float pad = CELL;
+        return new float[]{l - pad, t - pad, r + pad, b + pad};
+    }
+
+    /**
+     * Вся карта вкладки как одно огромное окно игры: фон, связи и узлы без
+     * рамки, колонки и полос прокрутки. Рисователь — в пикселях GUI, начало
+     * координат — левый верх плаката; чтобы нарисовать кусок плаката,
+     * вызывающий заранее сдвигает рисователь на минус начало куска.
+     *
+     * @param mapX левый край плаката в координатах карты (см. {@link #posterBounds})
+     */
+    public void renderPoster(GuiPainter p, float mapX, float mapY, int width, int height) {
+        float keepZoom = zoomFactor, keepX = guiMapX, keepY = guiMapY;
+        boolean keepInit = mapInitialized;
+        poster = true;
+        try {
+            bx = 0;
+            by = 0;
+            bw = width;
+            bh = height;
+            zoomFactor = 1f;
+            guiMapX = mapX;
+            guiMapY = mapY;
+            nodeHit.clear();
+            if (tab == null) return;
+
+            p.rectOpaque(0, 0, width, height, 0xFF000000);
+            drawPosterBackground(p, width, height);
+            drawLinks(p);
+            drawQuestButtons(p, false);
+        } finally {
+            poster = false;
+            zoomFactor = keepZoom;
+            guiMapX = keepX;
+            guiMapY = keepY;
+            mapInitialized = keepInit;
+            nodeHit.clear();
+        }
+    }
+
+    /**
+     * Фон плаката. Растянуть фон окна на всю карту, как {@link #drawMapBackground},
+     * нельзя: на карте в десять экранов звёзды стали бы кляксами. Поэтому
+     * звёзды повторяются с той плотностью, что в окне игры на обычном
+     * мониторе, а картинка вкладки — туманность без швов по краям —
+     * растягивается целиком, с сохранением пропорций.
+     */
+    private void drawPosterBackground(GuiPainter p, int width, int height) {
+        BufferedImage bgTex = ModAssets.get().tabBackground(tab.tabID);
+        BufferedImage stars = ModAssets.get().stars();
+
+        if (bgTex != null) {
+            float s = Math.max(width / 256f, height / 256f);
+            p.push();
+            p.scale(s);
+            p.texturedModalRect(bgTex, 0, 0, 0, 0, width / s, height / s);
+            p.pop();
+        }
+        if (stars != null) {
+            // окно карты на 1920×1080 при guiScale 2 — около 750 точек в ширину
+            float scale = 1.5f * (750f / 256f);
+            float[] layers = {1.33f, 1.77f, 2.37f, 3.16f, 4.21f};
+            p.push();
+            p.scale(scale);
+            float c = scale;
+            for (int i = 0; i < layers.length; i++) {
+                p.scale(0.75f);
+                c *= 0.75f;
+                // слои сдвинуты, чтобы повторы не совпадали в одном углу
+                float u = i * 37f, v = i * 53f;
+                p.texturedModalRect(stars, 0, 0, u, v, width / c, height / c);
+            }
+            p.pop();
+        }
+    }
+
     /** Закрасить только поля вокруг окна мода. */
     private void fillAround(GuiPainter p, int x, int y, int w, int h, int color) {
         if (y > 0) p.rectOpaque(0, 0, screenW, y, color);
@@ -446,6 +547,7 @@ public class GamePreview {
 
     /** QuestButton.drawBackground — плавное увеличение узла под курсором. */
     private float scaleFactorOf(Quest q) {
+        if (poster) return q.iconSize.scale;
         float cur = hoverScale.getOrDefault(q.questID, 1f);
         return cur * q.iconSize.scale;
     }

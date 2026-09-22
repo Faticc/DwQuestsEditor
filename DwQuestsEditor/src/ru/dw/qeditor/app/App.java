@@ -23,6 +23,7 @@ import ru.dw.qeditor.model.Parent;
 import ru.dw.qeditor.model.Quest;
 import ru.dw.qeditor.model.QuestTab;
 import ru.dw.qeditor.render.GamePreview;
+import ru.dw.qeditor.render.TabPoster;
 import ru.dw.qeditor.util.SelfTest;
 
 import java.io.File;
@@ -171,6 +172,7 @@ public final class App {
         // снимок вкладки для помощника рисуется тем же пакетом вершин, поэтому
         // только после того, как кадр окна закончен
         assistant.afterBatch(batch);
+        renderPendingPoster();
     }
 
     private void frame() {
@@ -461,6 +463,7 @@ public final class App {
                 item(items, actions, "Вставить вкладку из буфера", null, this::pasteTab);
                 item(items, actions, "Копировать вкладку в буфер", null, this::copyTab);
                 item(items, actions, "Копировать для /dwq tab paste", null, this::copyTabCompact);
+                item(items, actions, "Сохранить картинку вкладки…", null, this::savePoster);
                 separator(items, actions);
                 item(items, actions, "Перечитать файл", null, this::reloadFile);
                 separator(items, actions);
@@ -975,6 +978,79 @@ public final class App {
     private void copyTabCompact() {
         window.setClipboard(TabIO.toPasteString(model.tab()));
         status("Компактный JSON скопирован — можно вставлять в /dwq tab paste");
+    }
+
+    /** Плакат, ждущий отрисовки после кадра окна: файл и масштаб. */
+    private File posterFile;
+    private float posterScale;
+    /** Пропустить кадр, чтобы строка «Рисую…» успела показаться до долгой отрисовки. */
+    private boolean posterWait;
+
+    /** Вся карта вкладки одной картинкой: сначала качество, затем куда сохранить. */
+    private void savePoster() {
+        if (model.tab().quests.isEmpty()) {
+            status("Во вкладке нет квестов — рисовать нечего");
+            return;
+        }
+        GamePreview gp = posterPreview();
+        float[] scales = {2f, 3f, 4f};
+        StringBuilder text = new StringBuilder("Вся карта вкладки одной картинкой, как в игре, без рамки окна.\n\n");
+        String[] buttons = new String[scales.length + 1];
+        buttons[0] = "Отмена";
+        float[] b = gp.posterBounds();
+        for (int i = 0; i < scales.length; i++) {
+            float s = TabPoster.fitScale(gp, scales[i]);
+            int w = Math.round((b[2] - b[0]) * s), h = Math.round((b[3] - b[1]) * s);
+            buttons[i + 1] = "×" + (int) scales[i];
+            text.append("×").append((int) scales[i]).append(" — ").append(w).append(" × ").append(h);
+            if (s != scales[i]) text.append(String.format(" (урезано до ×%.2f)", s));
+            if (scales[i] == 2f) text.append(", как игра на масштабе 2");
+            if (scales[i] == 4f) text.append(", иконки в родных 64×64");
+            text.append('\n');
+        }
+        open(Dialogs.confirm("Картинка вкладки", text.toString(), buttons, answer -> {
+            if (answer < 1) return;
+            File dir = model.file() != null ? model.file().getParentFile() : lastDir();
+            File suggested = new File(dir == null ? new File(".") : dir,
+                    (model.tab().tabID == null ? "вкладка" : model.tab().tabID) + ".png");
+            File f = FileDialogs.savePng("Сохранить картинку вкладки", suggested);
+            if (f == null) return;
+            posterFile = f;
+            posterScale = scales[answer - 1];
+            posterWait = true;
+            status("Рисую картинку вкладки…");
+        }));
+    }
+
+    /** Отдельный просмотр для плаката: режим прогресса — как на странице просмотра. */
+    private GamePreview posterPreview() {
+        GamePreview gp = new GamePreview();
+        gp.setSingleTab(model.tab());
+        gp.setMode(preview.preview().getMode());
+        return gp;
+    }
+
+    /** Рисуется после кадра окна: пакет вершин один на всё. */
+    private void renderPendingPoster() {
+        if (posterFile == null) return;
+        if (posterWait) {
+            posterWait = false;
+            GlWindow.postEmptyEvent();
+            return;
+        }
+        File f = posterFile;
+        posterFile = null;
+        long start = System.nanoTime();
+        try {
+            TabPoster.Result r = TabPoster.render(posterPreview(), batch, f, posterScale);
+            status(String.format("Картинка сохранена: %s, %d × %d, ×%s за %.1f с", f.getName(),
+                    r.width(), r.height(), r.scale() == (int) r.scale() ? String.valueOf((int) r.scale())
+                            : String.format("%.2f", r.scale()), (System.nanoTime() - start) / 1e9));
+        } catch (OutOfMemoryError e) {
+            status("Не хватило памяти на картинку — попробуй качество пониже");
+        } catch (Exception e) {
+            error("Не удалось сохранить картинку", e);
+        }
     }
 
     private void pasteTab() {

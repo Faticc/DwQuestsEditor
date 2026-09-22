@@ -41,6 +41,20 @@ public final class FileDialogs {
         }
     }
 
+    public static File savePng(String title, File suggested) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PointerBuffer filters = stack.mallocPointer(1);
+            filters.put(stack.UTF8("*.png"));
+            filters.flip();
+            String path = TinyFileDialogs.tinyfd_saveFileDialog(
+                    title, suggested == null ? "" : suggested.getAbsolutePath(),
+                    filters, "Картинка PNG (*.png)");
+            if (path == null) return null;
+            if (!path.toLowerCase().endsWith(".png")) path = path + ".png";
+            return new File(path);
+        }
+    }
+
     public static File folder(String title, File startDir) {
         String path = TinyFileDialogs.tinyfd_selectFolderDialog(title, start(startDir));
         return path == null ? null : new File(path);
