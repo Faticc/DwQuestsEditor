@@ -7,6 +7,7 @@ import ru.dw.qbridge.DwqBridge;
 import ru.dw.qbridge.bridge.BridgeServer;
 import ru.dw.qbridge.client.Chat;
 import ru.dw.qbridge.client.ClientTicker;
+import ru.dw.qbridge.editor.EditorHost;
 import ru.dw.qbridge.export.IconRenderer;
 import ru.dw.qbridge.export.Names;
 import ru.dw.qbridge.export.Stacks;
@@ -29,7 +30,7 @@ import java.util.List;
  */
 public class CommandDwqb extends CommandBase {
 
-    private static final String[] SUB = {"help", "icons", "assets", "tabs", "all", "icon", "paste", "bridge", "stop", "status"};
+    private static final String[] SUB = {"help", "editor", "icons", "assets", "tabs", "all", "icon", "paste", "bridge", "stop", "status"};
 
     @Override
     public String getCommandName() {
@@ -62,6 +63,9 @@ public class CommandDwqb extends CommandBase {
 
         if (sub.equals("help")) {
             help();
+        } else if (sub.equals("editor")) {
+            // чат закроется сразу после команды — экран откроется следующим тиком
+            EditorHost.get().requestOpen(rest.length > 0 ? new File(join(rest)) : null);
         } else if (sub.equals("icons")) {
             String scope = rest.length > 0 ? rest[0] : "all";
             boolean force = has(rest, "--force");
@@ -92,6 +96,7 @@ public class CommandDwqb extends CommandBase {
     }
 
     private void help() {
+        Chat.say("§b/dwqb editor [файл] §7— редактор квестов (или клавиша F7, меняется в управлении)");
         Chat.say("§b/dwqb icons [all|quests|registry] [--force] §7— иконки предметов (с NBT)");
         Chat.say("§b/dwqb assets §7— текстуры модов и шрифт");
         Chat.say("§b/dwqb tabs [auto|raw|local] §7— вкладки квестов в файлы");

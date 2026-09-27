@@ -38,7 +38,6 @@ public final class BridgeServer {
     private static final BridgeServer INSTANCE = new BridgeServer();
 
     private HttpServer server;
-    private Api api;
 
     private BridgeServer() {}
 
@@ -59,7 +58,6 @@ public final class BridgeServer {
         int port = DwqBridge.config.port;
         try {
             server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 8);
-            api = new Api();
             server.createContext("/", new Dispatch());
             server.setExecutor(Executors.newFixedThreadPool(2, new ThreadFactory() {
                 public Thread newThread(Runnable r) {
@@ -82,8 +80,6 @@ public final class BridgeServer {
         if (server == null) return;
         server.stop(0);
         server = null;
-        if (api != null) api.dispose();
-        api = null;
         new File(DwqBridge.outDir, "bridge.json").delete();
         DwqBridge.LOG.info("мост остановлен");
     }
@@ -120,7 +116,9 @@ public final class BridgeServer {
                             "{\"error\":\"нужен ключ: заголовок X-Dwq-Token\"}".getBytes("UTF-8"));
                     return;
                 }
-                api.handle(ex, path, query, body(ex));
+                Api.Reply reply = Api.shared().handle(path, query, body(ex));
+                if (reply.iconPath != null) ex.getResponseHeaders().set("X-Dwq-Icon-Path", reply.iconPath);
+                send(ex, reply.code, reply.type, reply.data);
             } catch (Throwable t) {
                 DwqBridge.LOG.warn("запрос " + ex.getRequestURI() + " упал", t);
                 try {

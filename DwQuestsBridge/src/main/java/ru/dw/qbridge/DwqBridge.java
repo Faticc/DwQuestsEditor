@@ -65,6 +65,7 @@ public class DwqBridge {
         started = true;
         ClientTicker.register();
         ClientCommandHandler.instance.registerCommand(new CommandDwqb());
+        ru.dw.qbridge.editor.EditorHost.get().registerKey();
         if (withBridge) BridgeServer.get().start();
     }
 

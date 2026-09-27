@@ -95,6 +95,7 @@ public final class ClientTicker {
     public void onTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         mainThread = Thread.currentThread();
+        ru.dw.qbridge.editor.EditorHost.get().tick();
 
         // Задания моста короткие, но их может накопиться пачка — разбираем все.
         FutureTask<?> task;

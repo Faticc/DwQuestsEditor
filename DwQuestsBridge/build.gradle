@@ -17,6 +17,25 @@ dependencies {
     // NEI -- необязательный источник предметов с NBT (ItemList). Обращение к нему
     // изолировано в NeiStacks и включается только если мод загружен.
     compileOnly files("$client/mods/NotEnoughItems-2.7.59-GTNH-patched.jar")
+    // Редактор рисует шейдерами GL 3.3 через LWJGL 3: в клиенте его подставляет
+    // lwjgl3ify, поэтому в jar мода он не кладётся -- берётся из клиента же.
+    // Имена классов совпадают с LWJGL 2 (org.lwjgl.opengl.GL11), так что эти jar-ы
+    // должны идти на пути компиляции раньше майнкрафтовских.
+    ["lwjgl", "lwjgl-opengl", "lwjgl-stb", "lwjgl-tinyfd"].each { m ->
+        compileOnly files("$client/libraries/${m}-3.4.2.jar")
+    }
+    // @Lwjgl3Aware: lwjgl3ify переписывает org.lwjgl.* в классах модов на свою
+    // прослойку LWJGL 2 (org.lwjglx.*), где нет GL33C, tinyfd и прочего LWJGL 3.
+    // Классы редактора, которые рисуют шейдерами, помечены -- их он не трогает.
+    compileOnly files("$client/mods/lwjgl3ify-3.0.28.jar")
+}
+
+// LWJGL 3 -- первым на пути компиляции, иначе javac возьмёт одноимённые классы LWJGL 2.
+tasks.named("compileJava", JavaCompile) {
+    def lwjgl3 = ["lwjgl", "lwjgl-opengl", "lwjgl-stb", "lwjgl-tinyfd"].collect { file("$client/libraries/${it}-3.4.2.jar") }
+    doFirst {
+        classpath = files(lwjgl3) + classpath.filter { !lwjgl3.contains(it) }
+    }
 }
 
 tasks.named("compileJava") {

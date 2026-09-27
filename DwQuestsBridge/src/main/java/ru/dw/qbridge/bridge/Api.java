@@ -4,7 +4,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonWriter;
-import com.sun.net.httpserver.HttpExchange;
 import net.minecraft.client.Minecraft;
 import net.minecraft.item.ItemStack;
 import ru.dw.qbridge.DwqBridge;
@@ -30,8 +29,36 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
-/** Разбор запросов моста. Всё, что смотрит в игру, уходит в главный поток. */
-final class Api {
+/**
+ * Разбор запросов моста. Всё, что смотрит в игру, уходит в главный поток.
+ *
+ * <p>Запрос — это путь, параметры и тело, ответ — {@link Reply}; самого HTTP
+ * здесь нет. Поэтому тот же разбор обслуживает и HTTP-мост (консоль, внешние
+ * программы), и редактор внутри игры, который зовёт его напрямую
+ * ({@link #shared()}): из главного потока задания выполняются сразу, без
+ * очереди, и ожидания самого себя не получается.
+ */
+public final class Api {
+
+    /** Ответ: код, тип и тело; у иконки ещё путь её файла в выгрузке. */
+    public static final class Reply {
+        public final int code;
+        public final String type;
+        public final byte[] data;
+        public String iconPath;
+
+        Reply(int code, String type, byte[] data) {
+            this.code = code;
+            this.type = type;
+            this.data = data;
+        }
+    }
+
+    private static final Api SHARED = new Api();
+
+    public static Api shared() {
+        return SHARED;
+    }
 
     /** Дольше этого запрос ждать не будет: клиент мог уйти в меню или подвиснуть. */
     private static final long TIMEOUT_MS = 15000L;
@@ -54,33 +81,33 @@ final class Api {
         }
     }
 
-    void handle(HttpExchange ex, String path, Map<String, String> query, String body) throws Exception {
+    public Reply handle(String path, Map<String, String> query, String body) throws Exception {
         if (path.equals("/ping")) {
-            json(ex, ping());
+            return json(ping());
         } else if (path.equals("/tabs")) {
-            json(ex, tabs());
+            return json(tabs());
         } else if (path.equals("/tab")) {
-            tab(ex, query);
+            return tab(query);
         } else if (path.equals("/icon")) {
-            icon(ex, query);
+            return icon(query);
         } else if (path.equals("/item")) {
-            json(ex, item(query.get("stack")));
+            return json(item(query.get("stack")));
         } else if (path.equals("/items")) {
-            json(ex, items());
+            return json(items());
         } else if (path.equals("/export")) {
-            json(ex, ExportTasks.startFromBridge(query));
+            return json(ExportTasks.startFromBridge(query));
         } else if (path.equals("/status")) {
-            json(ex, status());
+            return json(status());
         } else if (path.equals("/stop")) {
             ClientTicker.get().stop();
-            json(ex, status());
+            return json(status());
         } else if (path.equals("/paste")) {
-            paste(ex, query, body);
+            return paste(query, body);
         } else if (path.equals("/paste-all")) {
-            pasteAll(ex, body);
+            return pasteAll(body);
         } else if (path.equals("/command")) {
             final String text = body;
-            progressAction(ex, new Callable<String>() {
+            return progressAction(new Callable<String>() {
                 public String call() { return QuestProgress.command(text); }
             });
         } else if (path.equals("/claim")) {
@@ -88,7 +115,7 @@ final class Api {
             final String tab = query.get("tab"), quest = query.get("quest");
             if (tab == null) throw new IllegalArgumentException("нужен параметр tab");
             if (quest != null) {
-                progressAction(ex, new Callable<String>() {
+                return progressAction(new Callable<String>() {
                     public String call() { return QuestProgress.claim(tab, quest); }
                 });
             } else {
@@ -96,26 +123,27 @@ final class Api {
                 if (body != null) {
                     for (String line : body.split("\n")) if (!line.trim().isEmpty()) ids.add(line.trim());
                 }
-                progressAction(ex, new Callable<String>() {
+                return progressAction(new Callable<String>() {
                     public String call() { return QuestProgress.claimMany(tab, ids); }
                 });
             }
         } else if (path.equals("/claim-all")) {
-            progressAction(ex, new Callable<String>() {
+            return progressAction(new Callable<String>() {
                 public String call() { return QuestProgress.claimAll(); }
             });
         } else if (path.equals("/progress")) {
             requireQuests();
             final String tab = query.get("tab");
             if (tab == null || tab.isEmpty()) throw new IllegalArgumentException("нужен параметр tab");
-            json(ex, ClientTicker.get().call(new Callable<String>() {
+            return json(ClientTicker.get().call(new Callable<String>() {
                 public String call() { return QuestProgress.progress(tab); }
             }, TIMEOUT_MS));
         } else {
-            BridgeServer.send(ex, 404, "application/json; charset=utf-8",
-                    "{\"error\":\"нет такого запроса\"}".getBytes("UTF-8"));
+            return new Reply(404, JSON, "{\"error\":\"нет такого запроса\"}".getBytes("UTF-8"));
         }
     }
+
+    private static final String JSON = "application/json; charset=utf-8";
 
     // ------------------------------------------------------------------- ответы
 
@@ -165,7 +193,7 @@ final class Api {
         }, TIMEOUT_MS);
     }
 
-    private void tab(HttpExchange ex, Map<String, String> query) throws Exception {
+    private Reply tab(Map<String, String> query) throws Exception {
         requireQuests();
         final String id = query.get("id");
         if (id == null || id.isEmpty()) throw new IllegalArgumentException("нужен параметр id");
@@ -176,7 +204,7 @@ final class Api {
                 return TabJson.write(tab);
             }
         }, TIMEOUT_MS);
-        BridgeServer.send(ex, 200, "application/json; charset=utf-8", json.getBytes("UTF-8"));
+        return json(json);
     }
 
     /**
@@ -186,7 +214,7 @@ final class Api {
      * генома нельзя, а нарисовать тот единственный, что стоит в квесте, —
      * можно прямо на лету.
      */
-    private void icon(HttpExchange ex, Map<String, String> query) throws Exception {
+    private Reply icon(Map<String, String> query) throws Exception {
         final String text = query.get("stack");
         if (text == null || text.isEmpty()) throw new IllegalArgumentException("нужен параметр stack");
         final int size = parseInt(query.get("size"), DwqBridge.config.iconSize);
@@ -208,13 +236,13 @@ final class Api {
         }, TIMEOUT_MS);
 
         if (png == null) {
-            BridgeServer.send(ex, 404, "application/json; charset=utf-8",
+            return new Reply(404, JSON,
                     ("{\"error\":\"нет такого предмета или он не рисуется\",\"stack\":" + quote(text) + "}")
                             .getBytes("UTF-8"));
-            return;
         }
-        ex.getResponseHeaders().set("X-Dwq-Icon-Path", iconPathHeader(text));
-        BridgeServer.send(ex, 200, "image/png", png);
+        Reply reply = new Reply(200, "image/png", png);
+        reply.iconPath = iconPathHeader(text);
+        return reply;
     }
 
     private String iconPathHeader(String text) {
@@ -291,7 +319,7 @@ final class Api {
         return sw.toString();
     }
 
-    private void paste(HttpExchange ex, Map<String, String> query, final String body) throws Exception {
+    private Reply paste(Map<String, String> query, final String body) throws Exception {
         requireQuests();
         final String id = query.get("id");
         if (id == null || id.isEmpty()) throw new IllegalArgumentException("нужен параметр id");
@@ -308,7 +336,7 @@ final class Api {
                 return "{\"ok\":true,\"sent\":true}";
             }
         }, TIMEOUT_MS);
-        BridgeServer.send(ex, 200, "application/json; charset=utf-8", result.getBytes("UTF-8"));
+        return json(result);
     }
 
     /**
@@ -316,7 +344,7 @@ final class Api {
      * Вкладки уходят по одной, каждая ждёт подтверждения сервера
      * ({@link TabBatchUpload}); ход виден в {@code /status}.
      */
-    private void pasteAll(HttpExchange ex, String body) throws Exception {
+    private Reply pasteAll(String body) throws Exception {
         requireQuests();
         if (body == null || body.trim().isEmpty()) throw new IllegalArgumentException("пустое тело запроса");
         final List<String[]> tabs = new ArrayList<String[]>();
@@ -337,7 +365,7 @@ final class Api {
                 return null;
             }
         }, TIMEOUT_MS);
-        json(ex, "{\"ok\":true,\"started\":\"paste\",\"tabs\":" + tabs.size() + "}");
+        return json("{\"ok\":true,\"started\":\"paste\",\"tabs\":" + tabs.size() + "}");
     }
 
     /** Сколько слушать чат после действия: сервер отвечает за тик-другой, но бывает и занят. */
@@ -348,7 +376,7 @@ final class Api {
      * главном потоке, подождать ответа сервера и вернуть, что он написал в чат, —
      * иначе редактор не узнает ни про нехватку прав, ни про опечатку в команде.
      */
-    private void progressAction(HttpExchange ex, Callable<String> action) throws Exception {
+    private Reply progressAction(Callable<String> action) throws Exception {
         requireQuests();
         String done = ClientTicker.get().call(action, TIMEOUT_MS);
         Thread.sleep(REPLY_MS);
@@ -358,7 +386,7 @@ final class Api {
             if (i > 0) sb.append(',');
             sb.append(quote(replies.get(i)));
         }
-        json(ex, sb.append("]}").toString());
+        return json(sb.append("]}").toString());
     }
 
     // ------------------------------------------------------------------- мелочи
@@ -367,8 +395,8 @@ final class Api {
         if (!Quests.modPresent()) throw new IllegalStateException("в клиенте нет мода DwQuests");
     }
 
-    private void json(HttpExchange ex, String text) throws IOException {
-        BridgeServer.send(ex, 200, "application/json; charset=utf-8", text.getBytes("UTF-8"));
+    private static Reply json(String text) throws IOException {
+        return new Reply(200, JSON, text.getBytes("UTF-8"));
     }
 
     private static JsonWriter writer(StringWriter sw) {
