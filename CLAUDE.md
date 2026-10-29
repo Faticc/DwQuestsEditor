@@ -36,6 +36,27 @@ javac -encoding UTF-8 -cp "lib/*" -d out @sources.txt
 И вызывать вложенные `.bat` только как `call "%~dp0build.bat"`: текущий каталог
 в поиске команд может быть отключён.
 
+## Android (`DwQuestsAndroid/`)
+
+Порт редактора под Android 8–16 без моста, с иконками внутри APK. Подробности —
+[DwQuestsAndroid/README.md](DwQuestsAndroid/README.md).
+
+```bash
+cd DwQuestsAndroid && LANG=C.UTF-8 ./gradlew assembleRelease
+```
+
+* Своей копии редактора нет: сборка берёт `DwQuestsBridge/src/main/java/ru/dw/qeditor`
+  и переписывает импорты GL33C → GLES 3.0, AWT/ImageIO → `android/awt`. **Правки в
+  общем коде попадают и в мод, и в телефон** — без `java.awt` за пределами уже
+  использованного (`BufferedImage`, `Graphics2D.drawImage/fillRect`, `ImageIO`)
+  прослойку придётся дополнять.
+* Файл в `src/main/overlay` по тому же пути заменяет общий целиком (`App`,
+  `FileDialogs`, `SettingsDialog`, `Config`, `UiFont`, `GifWriter`). Поменял
+  поведение общего `App` — проверь, не нужно ли то же в Android-`App`.
+* Ресурсы мода — через `ModAssets.useGamePack`, иконки — через
+  `ItemRegistry.useEmbedded` (оба из APK).
+* Эмулятора нет — вид и жесты снимает `devtools/probe.sh` (Xvfb + Mesa).
+
 ## Как править квесты без GUI
 
 Для этого есть консольный режим — им удобно пользоваться из терминала:

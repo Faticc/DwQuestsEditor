@@ -1,0 +1,139 @@
+/*
+ * Редактор вкладок DwQuests под Android.
+ *
+ * Своей копии редактора здесь нет: исходники берутся из того же дерева, что и
+ * у мода (DwQuestsBridge/src/main/java/ru/dw/qeditor), и при сборке
+ * переписываются в build/generated/shared — импорты OpenGL уходят на GLES 3.0
+ * (android/gles), AWT и ImageIO — на свои прослойки поверх Bitmap
+ * (android/awt). Файл, лежащий в src/main/overlay по тому же пути, заменяет
+ * общий целиком: это окно приложения, настройки, шрифт интерфейса, диалоги
+ * файлов — то, что на телефоне устроено иначе.
+ *
+ * Ресурсы мода и иконки предметов (runtime/ в корне репозитория) кладутся в
+ * APK как есть, вместе со списком записей — каталог ассетов иначе пришлось бы
+ * обходить через AssetManager.list, а это двадцать с лишним тысяч файлов.
+ */
+plugins {
+    id 'com.android.application' version '8.13.2'
+}
+
+def sharedRoot = file('../DwQuestsBridge/src/main/java')
+def overlayRoot = file('src/main/overlay')
+def runtimeRoot = file('../runtime')
+def sharedOut = layout.buildDirectory.dir('generated/shared/java')
+def indexOut = layout.buildDirectory.dir('generated/assetIndex')
+def examplesOut = layout.buildDirectory.dir('generated/examples')
+
+// Какие общие файлы заменены своими: путь в overlay совпадает с путём в общем дереве.
+def overlaid = fileTree(overlayRoot).include('**/*.java').collect {
+    overlayRoot.toPath().relativize(it.toPath()).toString().replace('\\', '/')
+}
+
+def rewrite = { String line ->
+    line.replace('org.lwjgl.opengl.GL33C', 'ru.dw.qeditor.android.gles.GL33C')
+        .replace('org.lwjgl.system.MemoryUtil', 'ru.dw.qeditor.android.gles.MemoryUtil')
+        .replace('me.eigenraven.lwjgl3ify.api.Lwjgl3Aware', 'ru.dw.qeditor.android.gles.Lwjgl3Aware')
+        .replace('javax.imageio.ImageIO', 'ru.dw.qeditor.android.awt.ImageIO')
+        .replaceAll(/java\.awt\.(image\.|geom\.|datatransfer\.)?/, 'ru.dw.qeditor.android.awt.')
+}
+
+tasks.register('syncSharedSources', Sync) {
+    from(sharedRoot) {
+        include 'ru/dw/qeditor/**/*.java'
+        // консольный режим и мост с игрой в телефоне не нужны
+        exclude 'ru/dw/qeditor/cli/**'
+        exclude overlaid
+    }
+    into sharedOut
+    filteringCharset = 'UTF-8'
+    filter { String line -> rewrite(line) }
+    inputs.property('overlaid', overlaid)
+}
+
+// Список ассетов: AssetPack у редактора умеет работать по такому списку.
+tasks.register('assetIndex') {
+    inputs.dir(runtimeRoot)
+    outputs.dir(indexOut)
+    doLast {
+        def out = indexOut.get().file('dwq-index.txt').asFile
+        out.parentFile.mkdirs()
+        def names = []
+        runtimeRoot.eachFileRecurse(groovy.io.FileType.FILES) {
+            names << runtimeRoot.toPath().relativize(it.toPath()).toString().replace('\\', '/')
+        }
+        names.sort()
+        out.setText(names.join('\n') + '\n', 'UTF-8')
+    }
+}
+
+// Примеры для «Файл → Примеры вкладок» — тестовые вкладки редактора.
+tasks.register('examples', Sync) {
+    from(file('../DwQuestsEditor/testquests')) { include '*.json' }
+    into examplesOut.map { it.dir('examples') }
+}
+
+android {
+    namespace 'ru.dw.qeditor.android'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'ru.dw.qeditor'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '2.0.0'
+    }
+
+    signingConfigs {
+        // Ключ лежит в репозитории нарочно: APK ставится руками, и обновление
+        // встаёт поверх прежнего, только если подпись та же на любой машине.
+        // Секретом он не является и для магазина не годится.
+        release {
+            storeFile file('keystore/dwquests-editor.jks')
+            storePassword 'dwquests'
+            keyAlias 'dwquests'
+            keyPassword 'dwquests'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        encoding 'UTF-8'
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += [overlayRoot, sharedOut]
+            assets.srcDirs += [runtimeRoot, indexOut, examplesOut]
+        }
+    }
+
+    androidResources {
+        // По умолчанию aapt выбрасывает каталоги на «_» и файлы на «~»;
+        // у иконок вариантов с NBT в имени как раз «~хеш».
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini'
+        noCompress 'png', 'bin'
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    packaging {
+        resources.excludes += ['META-INF/**']
+    }
+}
+
+tasks.named('preBuild') { dependsOn 'syncSharedSources', 'assetIndex', 'examples' }

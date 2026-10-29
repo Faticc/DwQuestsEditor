@@ -42,8 +42,10 @@ public abstract class Dialog {
         popup.blockIfOpen(ui);
         ui.rect(0, 0, ui.width(), ui.height(), Theme.SCRIM);
 
-        float w = Math.min(width, ui.width() - 40);
-        float h = Math.min(height, ui.height() - 40);
+        // на узком экране (телефон) поля вокруг окна дороже, чем вид
+        float margin = Math.min(ui.width(), ui.height()) < 600 ? 8 : 40;
+        float w = Math.min(width, ui.width() - margin);
+        float h = Math.min(height, ui.height() - margin);
         float x = Math.round((ui.width() - w) / 2);
         float y = Math.round((ui.height() - h) / 2);
 
@@ -72,7 +74,8 @@ public abstract class Dialog {
 
     /** Ряд кнопок по правому краю снизу; возвращает номер нажатой либо −1. */
     protected int buttons(Ui ui, float x, float y, float w, String... labels) {
-        float bw = 110;
+        // четыре кнопки по 110 в узкое окно не влезают — тогда ужимаем
+        float bw = Math.min(110, (w + 8) / labels.length - 8);
         float bx = x + w - labels.length * (bw + 8) + 8;
         int result = -1;
         for (int i = 0; i < labels.length; i++) {

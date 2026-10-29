@@ -138,11 +138,23 @@ public final class ItemRegistry {
     }
 
     /**
+     * Иконки, встроенные в само приложение (сборка под Android: игры рядом нет,
+     * и вся выгрузка лежит в APK). Задаётся до первого обращения к реестру.
+     */
+    private static AssetPack embedded;
+
+    public static void useEmbedded(AssetPack pack) {
+        embedded = pack;
+        if (instance != null) instance.reload();
+    }
+
+    /**
      * Папка иконок, которые игра уже нарисовала раньше ({@code dwq_export/icons}):
      * с ней карта сразу показывает знакомые предметы, а не ждёт, пока игра
      * дорисует каждую иконку заново.
      */
     private AssetPack openPack() {
+        if (embedded != null) return embedded;
         String dir = Config.get().iconsDir;
         if (!Config.isBlank(dir)) return AssetPack.dir(new File(dir));
         return AssetPack.empty("папка иконок не указана");
